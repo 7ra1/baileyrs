@@ -86,6 +86,9 @@
     },
     "link-preview-js": {
       "optional": true
+    },
+    "sharp": {
+      "optional": true
     }
   },
   "publishConfig": {
