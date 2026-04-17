@@ -5,11 +5,11 @@
  * work correctly against the mock WA server.
  */
 
-import { jest } from '@jest/globals'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
+import { after, before, describe, mock, test } from 'node:test'
 import P from 'pino'
 import makeWASocket, {
 	type BinaryNode,
@@ -18,8 +18,7 @@ import makeWASocket, {
 	jidNormalizedUser,
 	useMultiFileAuthState
 } from '../../index.ts'
-
-jest.setTimeout(30_000)
+import { expect } from '../expect.ts'
 
 type WASocket = ReturnType<typeof makeWASocket>
 
@@ -71,16 +70,16 @@ async function destroyTestClient(client: { sock: WASocket; authFolder: string })
 	}
 }
 
-describe('E2E: Retrocompat API', () => {
+describe('E2E: Retrocompat API', { timeout: 30_000 }, () => {
 	let alice: Awaited<ReturnType<typeof createTestClient>>
 	let bob: Awaited<ReturnType<typeof createTestClient>>
 
-	beforeAll(async () => {
+	before(async () => {
 		;[alice, bob] = await Promise.all([createTestClient('compat-alice'), createTestClient('compat-bob')])
 		logger.info({ alice: alice.jid, bob: bob.jid }, 'Both users connected')
 	})
 
-	afterAll(async () => {
+	after(async () => {
 		await Promise.all([destroyTestClient(alice), destroyTestClient(bob)])
 	})
 
@@ -119,7 +118,7 @@ describe('E2E: Retrocompat API', () => {
 	// -- ws EventEmitter --
 
 	test('ws.on("CB:...") registers without error', () => {
-		const handler = jest.fn()
+		const handler = mock.fn()
 		expect(() => alice.sock.ws.on('CB:call', handler)).not.toThrow()
 		alice.sock.ws.off('CB:call', handler)
 	})

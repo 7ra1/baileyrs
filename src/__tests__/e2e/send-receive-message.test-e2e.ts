@@ -1,9 +1,9 @@
-import { jest } from '@jest/globals'
 import { Buffer } from 'node:buffer'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
+import { after, before, describe, test } from 'node:test'
 import P from 'pino'
 import makeWASocket, {
 	Boom,
@@ -15,8 +15,7 @@ import makeWASocket, {
 	useMultiFileAuthState,
 	type WAMessage
 } from '../../index.ts'
-
-jest.setTimeout(60_000)
+import { expect } from '../expect.ts'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -112,16 +111,16 @@ function downloadCtx(sock: WASocket): DownloadMediaMessageContext {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('E2E: Two-user messaging', () => {
+describe('E2E: Two-user messaging', { timeout: 60_000 }, () => {
 	let alice: Awaited<ReturnType<typeof createTestClient>>
 	let bob: Awaited<ReturnType<typeof createTestClient>>
 
-	beforeAll(async () => {
+	before(async () => {
 		;[alice, bob] = await Promise.all([createTestClient('alice'), createTestClient('bob')])
 		logger.info({ alice: alice.jid, bob: bob.jid }, 'Both users connected')
 	})
 
-	afterAll(async () => {
+	after(async () => {
 		await Promise.all([destroyTestClient(alice), destroyTestClient(bob)])
 	})
 

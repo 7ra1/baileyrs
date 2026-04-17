@@ -1,9 +1,8 @@
-import { jest } from '@jest/globals'
+import { describe, it } from 'node:test'
 import { fetchLatestWaWebVersion } from '../../Utils/generics.ts'
+import { expect } from '../expect.ts'
 
-describe('fetchLatestWaWebVersion Integration Tests', () => {
-	jest.setTimeout(10000)
-
+describe('fetchLatestWaWebVersion Integration Tests', { timeout: 10_000 }, () => {
 	it('should successfully fetch the latest WhatsApp Web version from real API', async () => {
 		const result = await fetchLatestWaWebVersion()
 

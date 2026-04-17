@@ -1,4 +1,6 @@
+import { describe, it } from 'node:test'
 import { Boom } from '../Utils/boom.ts'
+import { expect } from './expect.ts'
 
 describe('Boom', () => {
 	it('stores statusCode from options', () => {

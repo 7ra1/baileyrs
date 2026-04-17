@@ -1,5 +1,7 @@
+import { describe, it } from 'node:test'
 import '../index.ts'
 import { proto } from '../../WAProto/index.js'
+import { expect } from './expect.ts'
 
 describe('proto serialization', () => {
 	it('handles string values in long fields gracefully', () => {
