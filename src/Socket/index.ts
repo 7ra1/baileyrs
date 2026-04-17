@@ -257,6 +257,9 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 					ev.off('connection.update', listener)
 					reject(new Boom('Timed out waiting for connection update', { statusCode: 408 }))
 				}, timeoutMs)
+				// Don't keep the process alive if the caller has already stopped
+				// awaiting (e.g. sock.end() during shutdown with in-flight queries).
+				timeout.unref()
 			}
 		})
 	}
@@ -314,6 +317,9 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 						ws.off(`TAG:${msgId}`, onRecv as (...args: unknown[]) => void)
 						reject(new Boom('Timed out waiting for message', { statusCode: DisconnectReason.timedOut }))
 					}, timeout)
+					// Query timers shouldn't keep the process alive past sock.end()
+					// if the caller has given up — same pattern as use-bridge-store.
+					timer.unref()
 				}
 			})
 		},
