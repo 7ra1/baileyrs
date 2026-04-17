@@ -1,4 +1,4 @@
-import type { SocketContext } from './types'
+import type { SocketContext } from './types.ts'
 
 export const makeNewsletterMethods = (ctx: SocketContext) => ({
 	newsletterCreate: async (name: string, description?: string) => {

@@ -1,20 +1,26 @@
 import { proto } from '../../WAProto/index.js'
-import type { Boom } from '../Utils/boom'
-import type { AuthenticationCreds, LIDMapping } from './Auth'
-import type { WACallEvent } from './Call'
-import type { Chat, ChatUpdate, PresenceData } from './Chat'
-import type { Contact } from './Contact'
+import type { Boom } from '../Utils/boom.ts'
+import type { AuthenticationCreds, LIDMapping } from './Auth.ts'
+import type { WACallEvent } from './Call.ts'
+import type { Chat, ChatUpdate, PresenceData } from './Chat.ts'
+import type { Contact } from './Contact.ts'
 import type {
 	GroupMetadata,
 	GroupParticipant,
 	ParticipantAction,
 	RequestJoinAction,
 	RequestJoinMethod
-} from './GroupMetadata'
-import type { Label } from './Label'
-import type { LabelAssociation } from './LabelAssociation'
-import type { MessageUpsertType, MessageUserReceiptUpdate, WAMessage, WAMessageKey, WAMessageUpdate } from './Message'
-import type { ConnectionState } from './State'
+} from './GroupMetadata.ts'
+import type { Label } from './Label.ts'
+import type { LabelAssociation } from './LabelAssociation.ts'
+import type {
+	MessageUpsertType,
+	MessageUserReceiptUpdate,
+	WAMessage,
+	WAMessageKey,
+	WAMessageUpdate
+} from './Message.ts'
+import type { ConnectionState } from './State.ts'
 
 export type BaileysEventMap = {
 	/** connection state has been updated -- WS closed, opened, connecting etc. */

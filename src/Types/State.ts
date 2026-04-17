@@ -1,5 +1,5 @@
-import type { Boom } from '../Utils/boom'
-import type { Contact } from './Contact'
+import type { Boom } from '../Utils/boom.ts'
+import type { Contact } from './Contact.ts'
 
 export type WAConnectionState = 'open' | 'connecting' | 'close'
 

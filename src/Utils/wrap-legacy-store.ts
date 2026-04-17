@@ -16,7 +16,7 @@ import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { JsStoreCallbacks } from 'whatsapp-rust-bridge'
 import { proto } from '../../WAProto/index.js'
-import type { AuthenticationCreds, AuthenticationState, LTHashState, SignalDataTypeMap } from '../Types/index'
+import type { AuthenticationCreds, AuthenticationState, LTHashState, SignalDataTypeMap } from '../Types/index.ts'
 
 // Runtime WAProto exports ADVSignedDeviceIdentity but d.ts uses AdvSignedDeviceIdentity
 type ProtoCodec = {

@@ -10,7 +10,7 @@ import {
 	type MediaType,
 	URL_REGEX,
 	WA_DEFAULT_EPHEMERAL
-} from '../Defaults/index'
+} from '../Defaults/index.ts'
 import type {
 	AnyMediaMessageContent,
 	AnyMessageContent,
@@ -22,12 +22,12 @@ import type {
 	WAMessage,
 	WAMessageContent,
 	WATextMessage
-} from '../Types/index'
-import { WAMessageStatus, WAProto } from '../Types/index'
-import { isJidGroup, isJidNewsletter, isJidStatusBroadcast, jidNormalizedUser } from '../WABinary/index'
-import { Boom } from './boom'
-import { unixTimestampSeconds } from './generics'
-import type { ILogger } from './logger'
+} from '../Types/index.ts'
+import { WAMessageStatus, WAProto } from '../Types/index.ts'
+import { isJidGroup, isJidNewsletter, isJidStatusBroadcast, jidNormalizedUser } from '../WABinary/index.ts'
+import { Boom } from './boom.ts'
+import { unixTimestampSeconds } from './generics.ts'
+import type { ILogger } from './logger.ts'
 import {
 	generateThumbnail,
 	getAudioDuration,
@@ -35,7 +35,7 @@ import {
 	getStream,
 	type MediaDownloadOptions,
 	toBuffer
-} from './messages-media'
+} from './messages-media.ts'
 
 type ExtractByKey<T, K extends PropertyKey> = T extends Record<K, unknown> ? T : never
 type RequireKey<T, K extends keyof T> = T & {

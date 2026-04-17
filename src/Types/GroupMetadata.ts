@@ -1,5 +1,5 @@
-import type { Contact } from './Contact'
-import type { WAMessageAddressingMode } from './Message'
+import type { Contact } from './Contact.ts'
+import type { WAMessageAddressingMode } from './Message.ts'
 
 export type GroupParticipant = Contact & {
 	isAdmin?: boolean

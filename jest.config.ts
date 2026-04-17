@@ -8,7 +8,7 @@ const config: Config = {
 	testMatch: ['<rootDir>/src/**/*.test.ts'],
 	extensionsToTreatAsEsm: ['.ts'],
 	moduleNameMapper: {
-		'^(\\.{1,2}/.*)\\.js$': '$1',
+		'^(\\.{1,2}/.*)\\.(js|ts)$': '$1',
 	},
 	transform: {
 		'^.+\\.tsx?$': [
@@ -18,7 +18,7 @@ const config: Config = {
 				tsconfig: {
 					module: 'esnext',
 					verbatimModuleSyntax: false,
-					allowImportingTsExtensions: false,
+					allowImportingTsExtensions: true,
 				},
 			},
 		],

@@ -1,5 +1,5 @@
 import type { JsHttpClientConfig, JsTransportCallbacks, JsTransportHandle } from 'whatsapp-rust-bridge'
-import type { ILogger } from '../Utils/logger'
+import type { ILogger } from '../Utils/logger.ts'
 
 interface TransportConfig {
 	waWebSocketUrl: string | URL

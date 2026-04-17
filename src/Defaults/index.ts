@@ -1,6 +1,6 @@
-import type { AuthenticationState, SocketConfig, WAVersion } from '../Types/index'
-import { Browsers } from '../Utils/browser-utils'
-import logger from '../Utils/logger'
+import type { AuthenticationState, SocketConfig, WAVersion } from '../Types/index.ts'
+import { Browsers } from '../Utils/browser-utils.ts'
+import logger from '../Utils/logger.ts'
 
 const version = [2, 3000, 1035194821]
 

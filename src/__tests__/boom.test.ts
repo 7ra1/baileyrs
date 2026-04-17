@@ -1,4 +1,4 @@
-import { Boom } from '../Utils/boom'
+import { Boom } from '../Utils/boom.ts'
 
 describe('Boom', () => {
 	it('stores statusCode from options', () => {

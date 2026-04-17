@@ -1,5 +1,5 @@
 import EventEmitter from 'node:events'
-import type { BaileysEventEmitter, BaileysEventMap } from '../Types/index'
+import type { BaileysEventEmitter, BaileysEventMap } from '../Types/index.ts'
 
 /**
  * Simple event emitter with `process()` support for Baileys events.

@@ -17,7 +17,7 @@ import makeWASocket, {
 	DisconnectReason,
 	jidNormalizedUser,
 	useMultiFileAuthState
-} from '../../index'
+} from '../../index.ts'
 
 jest.setTimeout(30_000)
 

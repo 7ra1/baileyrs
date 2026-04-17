@@ -1,4 +1,4 @@
-import type { SocketContext } from './types'
+import type { SocketContext } from './types.ts'
 
 export const makeBlockingMethods = (ctx: SocketContext) => ({
 	updateBlockStatus: async (jid: string, action: 'block' | 'unblock') => {

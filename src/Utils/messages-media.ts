@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
-import type { WAMediaUpload } from '../Types/index'
-import { Boom } from './boom'
-import type { ILogger } from './logger'
+import type { WAMediaUpload } from '../Types/index.ts'
+import { Boom } from './boom.ts'
+import type { ILogger } from './logger.ts'
 
 const randomId = () => globalThis.crypto.randomUUID()
 

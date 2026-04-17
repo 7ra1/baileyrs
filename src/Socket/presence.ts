@@ -1,4 +1,4 @@
-import type { SocketContext } from './types'
+import type { SocketContext } from './types.ts'
 
 export const makePresenceMethods = (ctx: SocketContext) => ({
 	sendPresence: async (status: 'available' | 'unavailable') => {

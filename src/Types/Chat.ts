@@ -1,11 +1,11 @@
 import type { proto } from '../../WAProto/index.js'
-import type { AccountSettings } from './Auth'
-import type { QuickReplyAction } from './Bussines'
-import type { BufferedEventData } from './Events'
-import type { LabelActionBody } from './Label'
-import type { ChatLabelAssociationActionBody } from './LabelAssociation'
-import type { MessageLabelAssociationActionBody } from './LabelAssociation'
-import type { MinimalMessage, WAMessageKey } from './Message'
+import type { AccountSettings } from './Auth.ts'
+import type { QuickReplyAction } from './Bussines.ts'
+import type { BufferedEventData } from './Events.ts'
+import type { LabelActionBody } from './Label.ts'
+import type { ChatLabelAssociationActionBody } from './LabelAssociation.ts'
+import type { MessageLabelAssociationActionBody } from './LabelAssociation.ts'
+import type { MinimalMessage, WAMessageKey } from './Message.ts'
 
 /** privacy settings in WhatsApp Web */
 export type WAPrivacyValue = 'all' | 'contacts' | 'contact_blacklist' | 'none'

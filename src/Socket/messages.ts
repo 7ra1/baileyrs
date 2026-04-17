@@ -8,12 +8,12 @@ import type {
 	WAMessage,
 	WAMessageContent,
 	WAMessageKey
-} from '../Types/index'
-import { WAProto } from '../Types/index'
-import { Boom } from '../Utils/boom'
-import { generateWAMessage, getContentType, normalizeMessageContent } from '../Utils/messages'
-import { jidNormalizedUser } from '../WABinary/index'
-import type { SocketContext } from './types'
+} from '../Types/index.ts'
+import { WAProto } from '../Types/index.ts'
+import { Boom } from '../Utils/boom.ts'
+import { generateWAMessage, getContentType, normalizeMessageContent } from '../Utils/messages.ts'
+import { jidNormalizedUser } from '../WABinary/index.ts'
+import type { SocketContext } from './types.ts'
 
 /** Extract the media content from a WAMessage (image, video, audio, document, sticker) */
 function getMediaContent(content: WAMessageContent | null | undefined) {

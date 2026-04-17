@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AuthenticationState } from '../Types/index'
+import type { AuthenticationState } from '../Types/index.ts'
 
 /**
  * Creates a file-based store for the WASM bridge.

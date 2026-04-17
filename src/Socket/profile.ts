@@ -1,4 +1,4 @@
-import type { SocketContext } from './types'
+import type { SocketContext } from './types.ts'
 
 export const makeProfileMethods = (ctx: SocketContext) => {
 	const setPushName = async (name: string) => {

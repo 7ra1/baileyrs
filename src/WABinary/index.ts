@@ -1,1 +1,1 @@
-export * from './jid-utils'
+export * from './jid-utils.ts'

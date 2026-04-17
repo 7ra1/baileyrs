@@ -1,6 +1,6 @@
 import { mkdir, stat } from 'node:fs/promises'
-import type { AuthenticationState } from '../Types/index'
-import { useBridgeStore } from './use-bridge-store'
+import type { AuthenticationState } from '../Types/index.ts'
+import { useBridgeStore } from './use-bridge-store.ts'
 
 /**
  * Creates a file-based authentication state for the Rust bridge.

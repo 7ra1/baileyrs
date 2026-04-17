@@ -1,9 +1,9 @@
 import type { MessageInfo, WhatsAppEvent } from 'whatsapp-rust-bridge'
-import type { BaileysEventMap, BinaryNode, ConnectionState, WAMessage, WAPresence } from '../Types/index'
-import { DisconnectReason, WAProto } from '../Types/index'
-import { Boom } from '../Utils/boom'
-import type { SocketContext } from './types'
-import { jidStr } from './types'
+import type { BaileysEventMap, BinaryNode, ConnectionState, WAMessage, WAPresence } from '../Types/index.ts'
+import { DisconnectReason, WAProto } from '../Types/index.ts'
+import { Boom } from '../Utils/boom.ts'
+import type { SocketContext } from './types.ts'
+import { jidStr } from './types.ts'
 
 const DEF_CALLBACK_PREFIX = 'CB:'
 

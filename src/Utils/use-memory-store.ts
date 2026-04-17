@@ -1,4 +1,4 @@
-import type { AuthenticationState } from '../Types/index'
+import type { AuthenticationState } from '../Types/index.ts'
 
 /**
  * Creates a purely in-memory store for the WASM bridge.

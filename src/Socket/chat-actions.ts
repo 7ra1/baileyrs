@@ -1,5 +1,5 @@
-import type { ChatModification, WAPatchName } from '../Types/index'
-import type { SocketContext } from './types'
+import type { ChatModification, WAPatchName } from '../Types/index.ts'
+import type { SocketContext } from './types.ts'
 
 export const makeChatActionMethods = (ctx: SocketContext) => ({
 	pinChat: async (jid: string, pin: boolean) => {
