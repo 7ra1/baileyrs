@@ -10,4 +10,28 @@ export interface ILogger {
 	error(obj: unknown, msg?: string): void
 }
 
-export default P({ timestamp: () => `,"time":"${new Date().toJSON()}"` })
+export default P({
+	name: 'baileyrs',
+	level: process.env.BAILEYRS_LOG_LEVEL || 'info',
+	timestamp: () => `,"time":"${new Date().toJSON()}"`,
+	redact: {
+		paths: [
+			'creds',
+			'authState',
+			'noiseKey',
+			'signedIdentityKey',
+			'advSecretKey',
+			'privateKey',
+			'secretKey',
+			'preKey.privateKey',
+			'*.creds',
+			'*.authState',
+			'*.noiseKey',
+			'*.signedIdentityKey',
+			'*.advSecretKey',
+			'*.privateKey',
+			'*.secretKey'
+		],
+		censor: '[REDACTED]'
+	}
+})
