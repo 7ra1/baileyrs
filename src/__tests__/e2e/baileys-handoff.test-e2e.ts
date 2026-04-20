@@ -215,10 +215,24 @@ async function destroyClient(client: AnyClient, removeFolder: boolean) {
 			client.sock.setAutoReconnect(false)
 			await client.sock.end()
 		} else {
-			// Upstream's `end()` accepts an optional Error; passing undefined
-			// triggers a clean close without the "intentional disconnect"
-			// flag, which is what we want for a swap.
+			// Upstream's `end()` is void and its background workers
+			// (`commitWithRetry`) keep firing after teardown. Wait for the
+			// connection-close event (bounded) and give the per-id mutex
+			// queue a beat to drain BEFORE rmSync — otherwise the ENOENT
+			// retry/backoff loop fires for ~30s post-teardown and contends
+			// for the host with the next suite's WebSocket handshake.
+			const closed = new Promise<void>(resolve => {
+				const on = (u: { connection?: string }) => {
+					if (u.connection === 'close') {
+						client.sock.ev.off('connection.update', on)
+						resolve()
+					}
+				}
+				client.sock.ev.on('connection.update', on)
+			})
 			client.sock.end(undefined)
+			await Promise.race([closed, new Promise<void>(r => setTimeout(r, 1000).unref())])
+			await new Promise<void>(r => setTimeout(r, 100).unref())
 		}
 	} catch {
 		/* ignore */

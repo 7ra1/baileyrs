@@ -86,23 +86,40 @@ export const makeTransport = (config: TransportConfig): JsTransportCallbacks => 
 				ws.send(data)
 			}
 		},
-		disconnect() {
+		async disconnect() {
 			const toClose = disconnectTarget ?? ws
-			if (toClose) {
-				// Fire onDisconnected BEFORE closing — the Rust engine's
-				// read_messages_loop needs this event to exit and reconnect.
-				handle?.onDisconnected()
-				// Abort listeners to prevent double-fire from the close event
-				abortControllers.get(toClose)?.abort()
-				try {
-					toClose.close()
-				} catch {
-					// already closed
-				}
-			}
-
 			if (toClose === ws) ws = undefined
 			disconnectTarget = undefined
+
+			if (!toClose) return
+
+			// Fire onDisconnected BEFORE closing — the Rust engine's
+			// read_messages_loop needs this event to exit and reconnect.
+			handle?.onDisconnected()
+			// Abort our listeners to prevent double-fire from the close event.
+			abortControllers.get(toClose)?.abort()
+
+			// Await the actual close before returning. Without this, the caller
+			// (core's `connect_and_run` on a 515 reconnect path) can race-open a
+			// brand-new WebSocket while the previous TCP connection is still in
+			// CLOSING on the server side; some servers (notably the bartender
+			// mock) queue / reject the new accept() until the old one is fully
+			// released, stalling reconnect to the 20s connect-timeout ceiling.
+			if (toClose.readyState === WebSocket.CLOSED) return
+
+			const closed = new Promise<void>(resolve => {
+				const done = () => resolve()
+				toClose.addEventListener('close', done, { once: true })
+			})
+			try {
+				toClose.close()
+			} catch {
+				// already closed
+				return
+			}
+			// Bound the wait so a pathological close (e.g. half-open TCP peer
+			// never acking FIN) can't hang shutdown beyond a short grace period.
+			await Promise.race([closed, new Promise<void>(r => setTimeout(r, 500).unref())])
 		}
 	}
 }
