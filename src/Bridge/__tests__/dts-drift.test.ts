@@ -64,9 +64,7 @@ function extractWhatsAppEventTypes(dts: string): string[] {
 		seen.add(m[1]!)
 	}
 	if (seen.size === 0) throw new Error('Failed to parse any variant from WhatsAppEvent union')
-	// `[...seen]` is already a fresh copy — sorting it in place is safe.
-	// eslint-disable-next-line unicorn/no-array-sort
-	return [...seen].sort()
+	return [...seen].toSorted()
 }
 
 describe('Bridge .d.ts ↔ adapter drift', () => {

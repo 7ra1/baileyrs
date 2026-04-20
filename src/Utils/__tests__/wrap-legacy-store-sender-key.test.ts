@@ -10,6 +10,7 @@
 import { Buffer } from 'node:buffer'
 import { describe, test } from 'node:test'
 import { SenderKeyRecord } from 'baileys/lib/Signal/Group/sender-key-record.js'
+import { SenderChainKey } from 'baileys/lib/Signal/Group/sender-chain-key.js'
 import { proto as bridgeProto } from 'whatsapp-rust-bridge/proto-types'
 import { expect } from '../../__tests__/expect.ts'
 import {
@@ -145,9 +146,7 @@ describe('wrap-legacy-store: sender_key value-byte translation', () => {
 		const rec = SenderKeyRecord.deserialize(onDisk)
 		const state = rec.getSenderKeyState()!
 		const ck = state.getSenderChainKey()
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- SenderChainKey is structurally typed
-		const bumped: any = { getIteration: () => ck.getIteration() + 5, getSeed: () => ck.getSeed() }
-		state.setSenderChainKey(bumped)
+		state.setSenderChainKey(new SenderChainKey(ck.getIteration() + 5, ck.getSeed()))
 		const newJson = JSON.stringify(rec.serialize(), (_k, v) => {
 			if (Buffer.isBuffer(v) || v instanceof Uint8Array || (v as { type?: string })?.type === 'Buffer') {
 				return { type: 'Buffer', data: Buffer.from((v as { data?: Uint8Array }).data ?? v).toString('base64') }

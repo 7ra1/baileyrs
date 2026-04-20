@@ -352,7 +352,7 @@ const converters: Record<string, Converter> = {
 	session: {
 		toBridge(_key, value) {
 			try {
-				if (value == null) return null // eslint-disable-line eqeqeq
+				if (value == null) return null
 				return upstreamSessionRecordToProto(value)
 			} catch (e) {
 				warn('session.toBridge encode failed:', e)
@@ -550,19 +550,12 @@ const b64 = (b: Uint8Array | undefined | null): string =>
 
 const fromB64 = (s: string | undefined | null): Buffer => (s ? Buffer.from(s, 'base64') : Buffer.alloc(0))
 
-interface BridgeChainProto {
-	senderRatchetKey?: Uint8Array | null
-	senderRatchetKeyPrivate?: Uint8Array | null
-	chainKey?: { index?: number; key?: Uint8Array } | null
-	messageKeys?: BridgeMessageKeyProto[]
-}
-
-interface BridgeMessageKeyProto {
-	index: number
-	cipherKey: Uint8Array
-	macKey: Uint8Array
-	iv: Uint8Array
-}
+// Reuse the proto-types interfaces directly so `RecordStructure.create({…})`
+// type-checks without casts. `proto.SessionStructure.IChain` etc. live under
+// the SessionStructure namespace.
+type BridgeChainProto = proto.SessionStructure.IChain
+type BridgeMessageKeyProto = NonNullable<proto.SessionStructure.Chain.IMessageKey>
+type BridgeSessionProto = proto.ISessionStructure
 
 /**
  * Derive Rust's per-message split (cipher 32 / mac 32 / iv 16) from JS's
@@ -599,17 +592,6 @@ function jsChainMessageKeysToProto(messageKeys: Record<string, string> | undefin
 		if (seed.length > 0) out.push(deriveProtoMessageKey(seed, counter))
 	}
 	return out
-}
-
-interface BridgeSessionProto {
-	rootKey?: Uint8Array | null
-	previousCounter?: number | null
-	senderChain?: BridgeChainProto | null
-	receiverChains?: BridgeChainProto[]
-	pendingPreKey?: { preKeyId?: number | null; signedPreKeyId?: number | null; baseKey?: Uint8Array | null } | null
-	remoteIdentityPublic?: Uint8Array | null
-	remoteRegistrationId?: number | null
-	aliceBaseKey?: Uint8Array | null
 }
 
 function sessionStructureToEntry(session: BridgeSessionProto, closedTs: number): UpstreamSessionEntry | null {
@@ -770,15 +752,9 @@ function upstreamSessionRecordToProto(record: unknown): Uint8Array {
 		if (!currentSession && entry.indexInfo.closed === -1) currentSession = ss
 		else previousSessions.push(ss)
 	}
-	// `BridgeSessionProto` is a structural mirror of `ISessionStructure`
-	// from `whatsapp-rust-bridge/proto-types`; the differences are nullable
-	// vs optional fields. We cast at the boundary to avoid pulling the full
-	// proto class types into our internal shape.
 	const recordOut = proto.RecordStructure.create({
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		currentSession: (currentSession ?? undefined) as any,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		previousSessions: previousSessions as any
+		currentSession: currentSession ?? undefined,
+		previousSessions
 	})
 	return proto.RecordStructure.encode(recordOut).finish()
 }
@@ -1108,7 +1084,6 @@ export async function wrapLegacyStore(
 		if (storeName === 'sender_key') {
 			const translated = bridgeSenderKeyToUpstream(key)
 			if (translated == null) {
-				// eslint-disable-line eqeqeq -- intentional null+undefined check
 				warn(`sender_key key translation failed for "${key}", falling back to passthrough`)
 				return key
 			}
@@ -1121,7 +1096,6 @@ export async function wrapLegacyStore(
 		if (storeName === 'session' || storeName === 'identity') {
 			const translated = bridgeAddrToBaileysAddr(key)
 			if (translated == null) {
-				// eslint-disable-line eqeqeq -- intentional null+undefined check
 				warn(`${storeName} key translation failed for "${key}", falling back to passthrough`)
 				return key
 			}
@@ -1143,7 +1117,7 @@ export async function wrapLegacyStore(
 	async function readBinary(type: string, id: string): Promise<Uint8Array | null> {
 		try {
 			const val = await storeGetOne(type, id)
-			return val != null ? toBuf(val as Uint8Array) : null // eslint-disable-line eqeqeq -- intentional null+undefined check
+			return val != null ? toBuf(val as Uint8Array) : null
 		} catch (e) {
 			warn(`GET ${type}/${id} failed:`, e)
 			return null
@@ -1209,7 +1183,7 @@ export async function wrapLegacyStore(
 				try {
 					const upstreamKey = translateKey(bridgeStore, key)
 					const value = await storeGetOne(type, upstreamKey)
-					if (value == null) return null // eslint-disable-line eqeqeq -- intentional null+undefined check
+					if (value == null) return null
 					return converters[bridgeStore]?.toBridge(key, value) ?? toBuf(value as Uint8Array)
 				} catch (e) {
 					warn(`GET ${bridgeStore}/${key} failed:`, e)

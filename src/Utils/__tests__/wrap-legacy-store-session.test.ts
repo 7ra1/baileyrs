@@ -13,8 +13,6 @@
 
 import { Buffer } from 'node:buffer'
 import { describe, test } from 'node:test'
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error -- libsignal lacks .d.ts
 import SessionRecord from 'libsignal/src/session_record.js'
 import { proto as bridgeProto } from 'whatsapp-rust-bridge/proto-types'
 import { expect } from '../../__tests__/expect.ts'
@@ -75,10 +73,9 @@ describe('wrap-legacy-store: session value-byte translation', () => {
 		)
 
 		const stored = keys.raw['session']?.[UPSTREAM_SESSION_KEY_LID]
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const rec = (SessionRecord as any).deserialize(stored)
+		const rec = SessionRecord.deserialize(stored)
 		expect(rec.haveOpenSession()).toBe(true)
-		const open = rec.getOpenSession()
+		const open = rec.getOpenSession()!
 		expect(open.registrationId).toBe(99)
 		expect(open.currentRatchet.previousCounter).toBe(4)
 		expect(Buffer.from(open.currentRatchet.rootKey).equals(rootKey)).toBe(true)
@@ -145,9 +142,8 @@ describe('wrap-legacy-store: session value-byte translation', () => {
 			BRIDGE_SESSION_KEY_PN,
 			buildBridgeSessionBytes({ remoteIdentity: new Uint8Array(remoteIdentity), remoteRegistrationId: 7 })
 		)
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const rec = (SessionRecord as any).deserialize(keys.raw['session']?.[UPSTREAM_SESSION_KEY_PN])
-		const open = rec.getOpenSession()
+		const rec = SessionRecord.deserialize(keys.raw['session']?.[UPSTREAM_SESSION_KEY_PN])
+		const open = rec.getOpenSession()!
 		expect(open.registrationId).toBe(7)
 		expect(Buffer.from(open.indexInfo.remoteIdentityKey).equals(remoteIdentity)).toBe(true)
 	})

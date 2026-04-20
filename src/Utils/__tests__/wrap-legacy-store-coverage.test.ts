@@ -10,8 +10,6 @@
 import { Buffer } from 'node:buffer'
 import { createHmac } from 'node:crypto'
 import { describe, test } from 'node:test'
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error -- libsignal lacks .d.ts
 import SessionRecord from 'libsignal/src/session_record.js'
 import { proto as bridgeProto } from 'whatsapp-rust-bridge/proto-types'
 import { expect } from '../../__tests__/expect.ts'
@@ -147,20 +145,17 @@ describe('wrap-legacy-store: idempotent round-trip', () => {
 
 		await wrapped.set('session', BRIDGE_SESSION_KEY_LID, original)
 		const stored1 = keys.raw['session']?.[UPSTREAM_SESSION_KEY_LID] as { _sessions: Record<string, unknown> }
-		// eslint-disable-next-line unicorn/no-array-sort, eslint-plugin-unicorn/no-useless-spread
-		const baseKeys1 = Object.keys(stored1._sessions).slice().sort()
+		const baseKeys1 = Object.keys(stored1._sessions).toSorted()
 
 		const back = (await wrapped.get('session', BRIDGE_SESSION_KEY_LID)) as Uint8Array
 		await wrapped.set('session', BRIDGE_SESSION_KEY_LID, back)
 		const stored2 = keys.raw['session']?.[UPSTREAM_SESSION_KEY_LID] as { _sessions: Record<string, unknown> }
-		// eslint-disable-next-line unicorn/no-array-sort
-		const baseKeys2 = Object.keys(stored2._sessions).slice().sort()
+		const baseKeys2 = Object.keys(stored2._sessions).toSorted()
 
 		expect(baseKeys2).toEqual(baseKeys1)
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const rec = (SessionRecord as any).deserialize(stored2)
+		const rec = SessionRecord.deserialize(stored2)
 		expect(rec.haveOpenSession()).toBe(true)
-		expect(Buffer.from(rec.getOpenSession().indexInfo.baseKey).equals(aliceBaseKey)).toBe(true)
+		expect(Buffer.from(rec.getOpenSession()!.indexInfo.baseKey).equals(aliceBaseKey)).toBe(true)
 	})
 
 	test('identity: SET → GET → SET produces byte-identical upstream blob', async () => {
@@ -205,9 +200,7 @@ describe('wrap-legacy-store: sender_key multi-state record', () => {
 		const protoBack = (await wrapped.get('sender_key', bridgeKey)) as Uint8Array
 		const decoded = bridgeProto.SenderKeyRecordStructure.decode(protoBack)
 		expect(decoded.senderKeyStates!.length).toBe(3)
-		const collected = decoded.senderKeyStates!.map(s => s.senderKeyId).slice()
-		// eslint-disable-next-line unicorn/no-array-sort
-		const ids = collected.sort((a, b) => a! - b!)
+		const ids = decoded.senderKeyStates!.map(s => s.senderKeyId).toSorted((a, b) => a! - b!)
 		expect(ids).toEqual([100, 200, 300])
 	})
 })
