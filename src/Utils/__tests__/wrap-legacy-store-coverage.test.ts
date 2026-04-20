@@ -206,7 +206,10 @@ describe('wrap-legacy-store: sender_key multi-state record', () => {
 		const decoded = bridgeProto.SenderKeyRecordStructure.decode(protoBack)
 		expect(decoded.senderKeyStates!.length).toBe(3)
 		// eslint-disable-next-line unicorn/no-array-sort
-		const ids = decoded.senderKeyStates!.map(s => s.senderKeyId).slice().sort((a, b) => a! - b!)
+		const ids = decoded
+			.senderKeyStates!.map(s => s.senderKeyId)
+			.slice()
+			.sort((a, b) => a! - b!)
 		expect(ids).toEqual([100, 200, 300])
 	})
 })
