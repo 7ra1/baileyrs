@@ -14,6 +14,7 @@ import { DisconnectReason, WAProto } from '../Types/index.ts'
 import { Boom } from '../Utils/boom.ts'
 import { isJidGroup } from '../WABinary/jid-utils.ts'
 import { buildGroupNotificationDomainEvent, buildGroupNotificationStubMessages } from './group-notifications.ts'
+import { mapReachoutTimelock } from './reachout.ts'
 import type { SocketContext } from './types.ts'
 
 const DEF_CALLBACK_PREFIX = 'CB:'
@@ -297,6 +298,25 @@ export const makeEventHandler = (
 			case 'notification':
 				ctx.logger.trace({ tag: evt.tag, attrs: evt.attrs }, 'bridge generic notification (no Baileys mapping)')
 				return
+
+			case 'mexNotification': {
+				// Route by op_name. Adding a new MEX-driven event means a new
+				// case here — no per-op_name plumbing in the Bridge layer.
+				if (evt.opName === 'NotificationUserReachoutTimelockUpdate') {
+					const state = mapReachoutTimelock(evt.payload)
+					if (state) {
+						ev.emit('connection.update', { reachoutTimeLock: state } as Partial<ConnectionState>)
+					} else {
+						ctx.logger.warn({ payload: evt.payload }, 'reachout-timelock push: payload missing expected fields')
+					}
+					return
+				}
+				ctx.logger.trace(
+					{ opName: evt.opName, offline: evt.offline },
+					'bridge mex notification with no Baileys mapping (drop)'
+				)
+				return
+			}
 
 			case 'noop':
 				ctx.logger.trace(

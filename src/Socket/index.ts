@@ -10,7 +10,14 @@ import {
 } from 'whatsapp-rust-bridge'
 import type { proto } from 'whatsapp-rust-bridge/proto-types'
 import { DEFAULT_CONNECTION_CONFIG } from '../Defaults/index.ts'
-import type { BinaryNode, ConnectionState, Contact, UserFacingSocketConfig, WAMessage } from '../Types/index.ts'
+import type {
+	BinaryNode,
+	ConnectionState,
+	Contact,
+	ReachoutTimelockState,
+	UserFacingSocketConfig,
+	WAMessage
+} from '../Types/index.ts'
 import { DisconnectReason } from '../Types/index.ts'
 import { Boom } from '../Utils/boom.ts'
 import { makeEventBuffer } from '../Utils/event-buffer.ts'
@@ -28,6 +35,7 @@ import { makeMessageMethods } from './messages.ts'
 import { makeNewsletterMethods } from './newsletter.ts'
 import { makePresenceMethods } from './presence.ts'
 import { makeProfileMethods } from './profile.ts'
+import { mapReachoutTimelock } from './reachout.ts'
 import { makeHttpClient, makeTransport } from './transport.ts'
 import type { SocketContext } from './types.ts'
 
@@ -542,6 +550,25 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		},
 		fetchStatus: async (...jids: string[]) => {
 			return (await ctx.getClient()).fetchStatus(jids) as Promise<Array<{ jid: string; status?: string }>>
+		},
+		/**
+		 * Fetch the account's current reachout-timelock state from the server.
+		 *
+		 * The same state is also pushed proactively via the
+		 * `NotificationUserReachoutTimelockUpdate` MEX notification, which is
+		 * surfaced on `connection.update.reachoutTimeLock` automatically. Use
+		 * this method to query on demand (e.g. on app start, or after a 463
+		 * nack hints that the timelock just kicked in).
+		 *
+		 * Emits the result on `connection.update.reachoutTimeLock` as a side
+		 * effect for parity with the push path. Returns the same state for
+		 * callers that prefer awaiting.
+		 */
+		fetchReachoutTimelock: async (): Promise<ReachoutTimelockState> => {
+			const payload = await (await ctx.getClient()).fetchReachoutTimelock()
+			const state = mapReachoutTimelock(payload) ?? { isActive: false }
+			ev.emit('connection.update', { reachoutTimeLock: state } as Partial<ConnectionState>)
+			return state
 		},
 		getBusinessProfile: async (jid: string) => {
 			return (await ctx.getClient()).getBusinessProfile(jid)

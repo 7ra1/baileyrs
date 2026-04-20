@@ -266,6 +266,22 @@ export interface CanonicalNotification {
 }
 
 /**
+ * Server-pushed MEX (GraphQL) update routed by textual `op_name`.
+ * Examples: `NotificationUserReachoutTimelockUpdate`, `MessageCappingInfoNotification`,
+ * `NotificationGroupPropertyUpdate`. The op_name is stable across WA Web
+ * bundle releases (numeric query ids rotate). Payload shape varies per
+ * op_name — consumers in `Socket/events.ts` switch on it.
+ */
+export interface CanonicalMexNotification {
+	type: 'mexNotification'
+	opName: string
+	from?: string
+	stanzaId?: string
+	offline: boolean
+	payload: Record<string, unknown>
+}
+
+/**
  * Bridge events we acknowledge but don't translate to a Baileys event.
  * Keeping them in the canonical union makes the events.ts switch
  * exhaustive — adding a new `noop` variant requires a deliberate edit.
@@ -309,4 +325,5 @@ export type CanonicalEvent =
 	| CanonicalUndecryptableMessage
 	| CanonicalRawNode
 	| CanonicalNotification
+	| CanonicalMexNotification
 	| CanonicalNoop

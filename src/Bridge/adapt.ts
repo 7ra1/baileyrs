@@ -97,7 +97,9 @@ export const KNOWN_BRIDGE_EVENT_TYPES = new Set<string>([
 	'delete_message_for_me_update',
 	// generic carriers
 	'notification',
-	'raw_node'
+	'raw_node',
+	// MEX (GraphQL) push notifications — routed by op_name downstream
+	'mex_notification'
 ])
 
 /** Result is `null` on unrecoverable shape mismatch — caller should drop the event. */
@@ -277,6 +279,21 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 			// minimal sanity check. Adapter guarantees `tag` is a string.
 			if (!isObject(data) || typeof data.tag !== 'string') return null
 			return { type: 'rawNode', node: data as never }
+		}
+
+		case 'mex_notification': {
+			if (!isObject(data)) return null
+			const opName = asString(data.op_name)
+			if (!opName) return null
+			const payload = isObject(data.payload) ? (data.payload as Record<string, unknown>) : {}
+			return {
+				type: 'mexNotification',
+				opName,
+				from: asJidString(data.from),
+				stanzaId: asString(data.stanza_id),
+				offline: asBoolOr(data.offline, false),
+				payload
+			}
 		}
 
 		default:
