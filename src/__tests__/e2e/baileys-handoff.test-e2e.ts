@@ -108,20 +108,21 @@ function waitForUpstreamMessage(
 	timeoutMs = 15_000
 ): Promise<proto.IWebMessageInfo> {
 	return new Promise((resolve, reject) => {
-		const cleanup = () => sock.ev.off('messages.upsert', listener)
-		const listener = (data: { messages: unknown[] }) => {
-			const msg = (data.messages as proto.IWebMessageInfo[]).find(predicate)
+		const listener = (data: { messages: proto.IWebMessageInfo[] }) => {
+			const msg = data.messages.find(predicate)
 			if (!msg) return
-			cleanup()
+			// @ts-expect-error -- listener type mismatch (WAMessage vs proto.IWebMessageInfo); same wire shape
+			sock.ev.off('messages.upsert', listener)
 			clearTimeout(tid)
 			resolve(msg)
 		}
 		const tid = setTimeout(() => {
-			cleanup()
+			// @ts-expect-error -- same nominal mismatch as above
+			sock.ev.off('messages.upsert', listener)
 			reject(new Error('Timed out waiting for upstream messages.upsert match'))
 		}, timeoutMs)
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- upstream emitter is structurally different
-		sock.ev.on('messages.upsert', listener as any)
+		// @ts-expect-error -- listener type mismatch (WAMessage vs proto.IWebMessageInfo); same wire shape
+		sock.ev.on('messages.upsert', listener)
 	})
 }
 
@@ -134,8 +135,12 @@ async function createBridgeClient(label: string, authFolder?: string): Promise<B
 	const { state, saveCreds } = await upstreamBaileys.useMultiFileAuthState(folder)
 
 	const sock = makeWASocket({
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- two libs, two proto builds, identical field shape
-		auth: state as any,
+		// upstream's AuthenticationCreds is the same shape as the bridge's
+		// (both ship from a forked WAProto), but TS treats them as distinct
+		// nominal types. Runtime is fine; the bridge reads only fields that
+		// exist in both.
+		// @ts-expect-error -- nominal mismatch between two forked WAProto builds
+		auth: state,
 		waWebSocketUrl: socketUrl,
 		logger: logger.child({ user: label, impl: 'bridge' })
 	})

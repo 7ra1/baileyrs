@@ -188,13 +188,12 @@ describe('wrap-legacy-store: sender_key multi-state record', () => {
 		const bridgeKey = `${SAMPLE_GROUP}:100000037037034@lid.0`
 		const upstreamKey = `${SAMPLE_GROUP}::100000037037034_1::0`
 		await wrapped.set('sender_key', bridgeKey, protoBytes)
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const stored = keys.raw['sender-key']?.[upstreamKey] as any
-		const json = JSON.parse(Buffer.from(stored).toString('utf-8'))
+		const stored = keys.raw['sender-key']?.[upstreamKey] as Buffer
+		const json = JSON.parse(stored.toString('utf-8')) as Array<{ senderKeyId: number }>
 		expect(json.length).toBe(3)
-		expect(json[0].senderKeyId).toBe(100)
-		expect(json[1].senderKeyId).toBe(200)
-		expect(json[2].senderKeyId).toBe(300)
+		expect(json[0]!.senderKeyId).toBe(100)
+		expect(json[1]!.senderKeyId).toBe(200)
+		expect(json[2]!.senderKeyId).toBe(300)
 
 		// Read back via bridge GET — all 3 states preserved.
 		const protoBack = (await wrapped.get('sender_key', bridgeKey)) as Uint8Array

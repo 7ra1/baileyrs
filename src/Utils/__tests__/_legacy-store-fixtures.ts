@@ -5,23 +5,28 @@
  */
 
 import { proto as bridgeProto } from 'whatsapp-rust-bridge/proto-types'
+import type { AuthenticationState, SignalKeyStore, SignalKeyStoreWithTransaction } from '../../Types/index.ts'
 import { initAuthCreds } from '../generics.ts'
 import { wrapLegacyStore } from '../wrap-legacy-store.ts'
+
+/** Heterogeneous values held by the in-memory keys store. The bridge writes
+ *  raw `Buffer`s for Signal records, plain JS objects for sessions, and
+ *  strings for lid_mapping — `unknown` keeps each test honest about which. */
+export type MemKeysValue = Buffer | string | object | null
 
 /** In-memory keys store mirroring upstream `useMultiFileAuthState`'s
  *  `keys.get(type, ids[])` / `keys.set({ [type]: { [id]: value } })`. */
 export function makeMemKeys() {
-	const data: Record<string, Record<string, unknown>> = {}
+	const data: Record<string, Record<string, MemKeysValue>> = {}
 	return {
 		raw: data,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors upstream surface
-		async get(type: string, ids: string[]): Promise<Record<string, any>> {
+		async get(type: string, ids: string[]): Promise<Record<string, MemKeysValue>> {
 			const bucket = data[type] ?? {}
-			const out: Record<string, unknown> = {}
+			const out: Record<string, MemKeysValue> = {}
 			for (const id of ids) out[id] = bucket[id] ?? null
 			return out
 		},
-		async set(updates: Record<string, Record<string, unknown>>): Promise<void> {
+		async set(updates: Record<string, Record<string, MemKeysValue>>): Promise<void> {
 			for (const [type, bucket] of Object.entries(updates)) {
 				data[type] ??= {}
 				for (const [id, val] of Object.entries(bucket)) {
@@ -33,12 +38,19 @@ export function makeMemKeys() {
 	}
 }
 
-/** Build a wrap-legacy-store wired to a fresh in-memory keys backend. */
+/** Build a wrap-legacy-store wired to a fresh in-memory keys backend.
+ *  The double-cast through `unknown` is intentional: the test's keys
+ *  callback is heterogeneous (`MemKeysValue`) by design, but
+ *  `AuthenticationState['keys']` is the strongly-typed `SignalKeyStore`
+ *  union — they overlap structurally without sharing a parameterised type. */
 export async function makeWrapped() {
 	const creds = initAuthCreds()
 	const keys = makeMemKeys()
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal AuthenticationState surface
-	const wrapped = await wrapLegacyStore({ creds, keys: keys as any }, async () => {})
+	const state: AuthenticationState = {
+		creds,
+		keys: keys as unknown as SignalKeyStore | SignalKeyStoreWithTransaction
+	}
+	const wrapped = await wrapLegacyStore(state, async () => {})
 	return { wrapped, keys, creds }
 }
 

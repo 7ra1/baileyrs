@@ -249,18 +249,28 @@ const converters: Record<string, Converter> = {
 
 	tc_token: {
 		toBridge(_key, value) {
-			const tc = value as { token: Buffer; timestamp?: string }
+			// Rust `TcTokenEntry { token: Vec<u8>, token_timestamp: i64,
+			// sender_timestamp: Option<i64> }`. serde_json maps Vec<u8> to a
+			// numeric array — base64 strings make the deserializer choke
+			// with "invalid type: string ... expected a sequence".
+			const tc = value as { token: Buffer; timestamp?: string; senderTimestamp?: string }
 			return toJson({
-				token: tc.token ? Buffer.from(tc.token).toString('base64') : '',
-				token_timestamp: tc.timestamp ? parseInt(tc.timestamp) : 0
+				token: tc.token ? bufToNumArray(Buffer.from(tc.token)) : [],
+				token_timestamp: tc.timestamp ? parseInt(tc.timestamp) : 0,
+				sender_timestamp: tc.senderTimestamp ? parseInt(tc.senderTimestamp) : null
 			})
 		},
 		fromBridge(_key, value) {
 			try {
-				const j = fromJson(value) as { token?: string; token_timestamp?: number }
+				const j = fromJson(value) as {
+					token?: number[]
+					token_timestamp?: number
+					sender_timestamp?: number | null
+				}
 				return {
-					token: j.token ? Buffer.from(j.token, 'base64') : Buffer.alloc(0),
-					timestamp: j.token_timestamp?.toString()
+					token: Array.isArray(j.token) ? Buffer.from(j.token) : Buffer.alloc(0),
+					timestamp: j.token_timestamp?.toString(),
+					senderTimestamp: j.sender_timestamp != null ? j.sender_timestamp.toString() : undefined
 				}
 			} catch {
 				return { token: Buffer.from(value) }
