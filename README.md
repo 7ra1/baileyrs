@@ -576,7 +576,11 @@ const sock = makeWASocket({
     options: { dispatcher: undiciAgent },
 
     // Cache (Rust-side, see CacheConfig type)
-    cache: { group: { ttlSecs: 7200 } }
+    cache: { group: { ttlSecs: 7200 } },
+
+    // Optional override for the display identity sent at pairing.
+    // Orthogonal to `browser`. Only takes effect on the initial pairing.
+    deviceProps: { os: '...', platformType: 'CHROME' }
 })
 ```
 

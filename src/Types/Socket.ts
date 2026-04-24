@@ -1,6 +1,13 @@
 import type { URL } from 'url'
-import type { CacheConfig } from 'whatsapp-rust-bridge'
+import type { CacheConfig, DevicePropsInput } from 'whatsapp-rust-bridge'
 import type { proto } from 'whatsapp-rust-bridge/proto-types'
+
+export type {
+	DeviceAppVersion,
+	DeviceHistorySyncConfig,
+	DevicePlatformType,
+	DevicePropsInput
+} from 'whatsapp-rust-bridge'
 import type { ILogger } from '../Utils/logger.ts'
 import type { AuthenticationState } from './Auth.ts'
 import type { GroupMetadata } from './GroupMetadata.ts'
@@ -54,6 +61,18 @@ export type SocketConfig = {
 	 * Omitted fields keep defaults. See CacheConfig type for details.
 	 */
 	cache?: CacheConfig
+	/**
+	 * Override the `DeviceProps` advertised in the pairing registration node
+	 * (display name in "Linked Devices" + server-side feature gating, e.g.
+	 * view-once payload vs `absent` stub for non-Android companions).
+	 *
+	 * Orthogonal to `browser` — that controls the connection identity, this
+	 * controls the post-pairing display identity. When omitted, defaults are
+	 * derived from `browser`. Setting `platformType: 'ANDROID_PHONE'` does
+	 * NOT switch the underlying transport — baileyrs still speaks the web
+	 * protocol; real Android companion mode (CRSC/TEE) is not implemented.
+	 */
+	deviceProps?: DevicePropsInput
 
 	// ─────────────────────────────────────────────────────────────────────
 	// Upstream-Baileys options accepted for type-level compatibility.

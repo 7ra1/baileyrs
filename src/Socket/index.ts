@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { EventEmitter } from 'node:events'
 import {
 	createWhatsAppClient,
+	type DevicePlatformType,
 	encodeProto,
 	initWasmEngine,
 	type MediaType,
@@ -40,6 +41,31 @@ import { makeHttpClient, makeTransport } from './transport.ts'
 import type { SocketContext } from './types.ts'
 
 let wasmInitialized = false
+
+/**
+ * Default mapping for the legacy `browser[1]` slot — preserved so users on the
+ * existing `Browsers.macOS('Chrome')` style get the same `DeviceProps.platformType`
+ * they always got. Anything outside this set falls back to `CHROME` (matching
+ * the prior bridge behavior). Override with the explicit `deviceProps` config.
+ */
+const browserToPlatformType = (browser: string): DevicePlatformType => {
+	switch (browser) {
+		case 'Chrome':
+			return 'CHROME'
+		case 'Firefox':
+			return 'FIREFOX'
+		case 'Safari':
+			return 'SAFARI'
+		case 'Edge':
+			return 'EDGE'
+		case 'Opera':
+			return 'OPERA'
+		case 'Desktop':
+			return 'DESKTOP'
+		default:
+			return 'CHROME'
+	}
+}
 
 /**
  * Returns a no-op `SignalKeyStore`-shaped facade. baileyrs hands this out from
@@ -281,7 +307,11 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		_registerActiveBridgeClient(client, logger)
 
 		const [osName, browserName] = fullConfig.browser
-		await client.setDeviceProps(osName, browserName)
+		await client.setDeviceProps({
+			os: osName,
+			platformType: browserToPlatformType(browserName),
+			...fullConfig.deviceProps
+		})
 
 		const [major, minor, patch] = fullConfig.version
 		client.setVersion(major, minor, patch)
