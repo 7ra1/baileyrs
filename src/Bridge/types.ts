@@ -95,6 +95,8 @@ export interface CanonicalMessage {
 	participantAlt?: string
 	/** LID counterpart of the chat (1:1 only) when the recipient is LID. */
 	remoteJidAlt?: string
+	/** True when the underlying payload is a view-once message (wrapper or inline flag). */
+	isViewOnce?: boolean
 	messageProto: WAProto.IMessage
 }
 

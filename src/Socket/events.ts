@@ -60,6 +60,7 @@ const canonicalMessageToWAMessage = (m: CanonicalMessage): WAMessage => {
 	}) as WAMessage
 	if (m.participantAlt) wm.key.participantAlt = m.participantAlt
 	if (m.remoteJidAlt) wm.key.remoteJidAlt = m.remoteJidAlt
+	if (m.isViewOnce) wm.key.isViewOnce = true
 	return wm
 }
 
@@ -73,7 +74,7 @@ const canonicalMessageToWAMessage = (m: CanonicalMessage): WAMessage => {
 export const makeEventHandler = (
 	ctx: SocketContext,
 	callbacks?: {
-		onPairSuccess?: (data: { platform?: string; businessName?: string }) => void
+		onPairSuccess?: (data: { platform?: string; businessName?: string }) => void | Promise<void>
 	}
 ) => {
 	const { ev } = ctx

@@ -19,3 +19,4 @@ TestData
 wa-logs*
 coverage
 .claude/
+auth

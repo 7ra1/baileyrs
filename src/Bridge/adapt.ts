@@ -337,6 +337,7 @@ const adaptMessage = (data: unknown, logger?: ILogger): CanonicalEvent | null =>
 		pushName: asString(info.push_name),
 		participantAlt,
 		remoteJidAlt,
+		isViewOnce: info.is_view_once === true ? true : undefined,
 		messageProto: messageProto as never
 	}
 }

@@ -62,6 +62,8 @@ const browserToPlatformType = (browser: string): DevicePlatformType => {
 			return 'OPERA'
 		case 'Desktop':
 			return 'DESKTOP'
+		case 'Android':
+			return 'ANDROID_PHONE'
 		default:
 			return 'CHROME'
 	}
@@ -307,8 +309,10 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		_registerActiveBridgeClient(client, logger)
 
 		const [osName, browserName] = fullConfig.browser
+
+		const deviceOs = browserName === 'Android' ? 'Android' : osName
 		await client.setDeviceProps({
-			os: osName,
+			os: deviceOs,
 			platformType: browserToPlatformType(browserName),
 			...fullConfig.deviceProps
 		})
@@ -327,6 +331,13 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 
 		if (account) {
 			cachedAccount = account
+		}
+
+		// Android browser slot flips the noise-handshake identity to
+		// `UserAgent.platform = ANDROID` (no `web_info`), mirroring upstream
+		// Baileys PR #2201. Required for the server to deliver view_once payloads.
+		if (browserName === 'Android') {
+			await client.setClientProfile({ preset: 'android', osVersion: osName })
 		}
 
 		if (isRawNodeEnabled()) {
