@@ -194,8 +194,13 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 			expect(result.action.type).toBe('revokeInvite')
 		})
 
-		it('new variants from PR #567 surface as `unknown` with the wire-tag preserved', () => {
-			for (const tag of ['membership_approval_request', 'created_membership_requests', 'revoked_membership_requests']) {
+		it('PR #567 join-request variants narrow to canonical membership* / revoked* shapes', () => {
+			const expected = {
+				membership_approval_request: 'membershipApprovalRequest',
+				created_membership_requests: 'createdMembershipRequests',
+				revoked_membership_requests: 'revokedMembershipRequests'
+			} as const
+			for (const [tag, canonical] of Object.entries(expected)) {
 				const result = adaptBridgeEvent({
 					type: 'group_update',
 					data: {
@@ -205,8 +210,8 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 						action: { type: tag }
 					}
 				} as unknown as WhatsAppEvent)
-				if (result?.type !== 'groupUpdate' || result.action.type !== 'unknown') throw new Error('narrowing')
-				expect(result.action.rawType).toBe(tag)
+				if (result?.type !== 'groupUpdate') throw new Error('narrowing')
+				expect(result.action.type).toBe(canonical)
 			}
 		})
 	})
@@ -284,12 +289,20 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 	})
 
 	describe('chat state', () => {
-		it('archive_update maps to canonical archiveUpdate', () => {
+		it('archive_update maps to canonical archiveUpdate (default archived=true)', () => {
 			const result = adaptBridgeEvent({
 				type: 'archive_update',
 				data: { jid: { user: '5511', server: 's.whatsapp.net' } }
 			} as never)
-			expect(result).toEqual({ type: 'archiveUpdate', jid: '5511@s.whatsapp.net' })
+			expect(result).toEqual({ type: 'archiveUpdate', jid: '5511@s.whatsapp.net', archived: true })
+		})
+
+		it('archive_update propagates action.archived=false (unarchive)', () => {
+			const result = adaptBridgeEvent({
+				type: 'archive_update',
+				data: { jid: { user: '5511', server: 's.whatsapp.net' }, action: { archived: false } }
+			} as never)
+			expect(result).toEqual({ type: 'archiveUpdate', jid: '5511@s.whatsapp.net', archived: false })
 		})
 
 		it('star_update reads action.starred even when wrapped', () => {
@@ -356,11 +369,31 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 	})
 
 	describe('noop / passthrough', () => {
-		it('history_sync collapses to noop', () => {
+		it('history_sync with empty payload yields an empty historySync canonical', () => {
+			// Bridge change moved this off the noop path. With an empty
+			// proto we still produce a CanonicalHistorySync with empty
+			// arrays — the dispatcher emits messaging-history.set unchanged.
 			expect(adaptBridgeEvent({ type: 'history_sync', data: {} } as never)).toEqual({
-				type: 'noop',
-				bridgeType: 'history_sync'
+				type: 'historySync',
+				chats: [],
+				contacts: [],
+				messages: [],
+				lidPnMappings: [],
+				syncType: undefined,
+				progress: undefined,
+				chunkOrder: undefined,
+				peerDataRequestSessionId: undefined
 			})
+		})
+
+		it('history_sync propagates peerDataRequestSessionId from bridge overlay', () => {
+			const result = adaptBridgeEvent({
+				type: 'history_sync',
+				data: { peerDataRequestSessionId: 'PDO-XYZ', syncType: 4 }
+			} as never)
+			if (result?.type !== 'historySync') throw new Error('narrowing')
+			expect(result.peerDataRequestSessionId).toBe('PDO-XYZ')
+			expect(result.syncType).toBe(4)
 		})
 
 		it('raw_node passes through with tag/attrs', () => {

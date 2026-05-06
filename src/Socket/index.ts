@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
 	createWhatsAppClient,
@@ -15,6 +16,7 @@ import type {
 	BinaryNode,
 	ConnectionState,
 	Contact,
+	LIDMapping,
 	ReachoutTimelockState,
 	UserFacingSocketConfig,
 	WAMessage
@@ -27,6 +29,7 @@ import { _registerActiveBridgeClient, downloadMediaMessage } from '../Utils/mess
 import { makeNativeCryptoProvider } from '../Utils/native-crypto-provider.ts'
 import type { MediaDownloadOptions } from '../Utils/messages-media.ts'
 import { wrapLegacyStore } from '../Utils/wrap-legacy-store.ts'
+import { assertNodeErrorFree } from '../WABinary/generic-utils.ts'
 import { makeBlockingMethods } from './blocking.ts'
 import { makeChatActionMethods } from './chat-actions.ts'
 import { makeContactMethods } from './contacts.ts'
@@ -153,6 +156,73 @@ function makeSignalRepository(ctx: SocketContext) {
 			getPNForLID: async (lid: string): Promise<string | null> => {
 				const client = await ctx.getClient()
 				return (await client.pnForLid(lid)) ?? null
+			},
+			/**
+			 * Batch variant of `getLIDForPN`. Upstream Baileys' equivalent
+			 * coalesces in-flight requests and de-duplicates inputs; we run
+			 * the lookups in parallel and return the same `LIDMapping[]`
+			 * shape so callers (e.g. `process-message.ts`) keep working.
+			 *
+			 * Uses `Promise.allSettled` so one bridge-side failure (e.g.
+			 * malformed JID, transient cache miss) doesn't reject the
+			 * whole batch and lose every successful lookup. Failures are
+			 * logged at debug and skipped.
+			 *
+			 * Returns `null` (not `[]`) when the input list is empty, to
+			 * mirror upstream's "absent" sentinel.
+			 */
+			getLIDsForPNs: async (pns: string[]): Promise<LIDMapping[] | null> => {
+				if (pns.length === 0) return null
+				const client = await ctx.getClient()
+				const unique = [...new Set(pns)]
+				const settled = await Promise.allSettled(
+					unique.map(async pn => {
+						const lid = (await client.lidForPn(pn)) ?? null
+						return lid ? ({ pn, lid } satisfies LIDMapping) : null
+					})
+				)
+				const resolved: LIDMapping[] = []
+				for (const r of settled) {
+					if (r.status === 'fulfilled') {
+						if (r.value) resolved.push(r.value)
+					} else {
+						ctx.logger.debug({ err: r.reason }, 'getLIDsForPNs: lookup rejected — skipping')
+					}
+				}
+				return resolved
+			},
+			getPNsForLIDs: async (lids: string[]): Promise<LIDMapping[] | null> => {
+				if (lids.length === 0) return null
+				const client = await ctx.getClient()
+				const unique = [...new Set(lids)]
+				const settled = await Promise.allSettled(
+					unique.map(async lid => {
+						const pn = (await client.pnForLid(lid)) ?? null
+						return pn ? ({ pn, lid } satisfies LIDMapping) : null
+					})
+				)
+				const resolved: LIDMapping[] = []
+				for (const r of settled) {
+					if (r.status === 'fulfilled') {
+						if (r.value) resolved.push(r.value)
+					} else {
+						ctx.logger.debug({ err: r.reason }, 'getPNsForLIDs: lookup rejected — skipping')
+					}
+				}
+				return resolved
+			},
+			/**
+			 * No-op shim. The Rust bridge auto-learns LID↔PN mappings inside
+			 * `decode_message` / `usync` and persists them through
+			 * `JsStoreCallbacks` — upstream Baileys callers (notably
+			 * `process-message.ts` re-feeding mappings from `historySync`)
+			 * keep type-checking, but we don't need to write back.
+			 *
+			 * Logs at debug so unexpected paths stay traceable.
+			 */
+			storeLIDPNMappings: async (pairs: LIDMapping[]): Promise<void> => {
+				if (pairs.length === 0) return
+				ctx.logger.debug({ count: pairs.length }, 'lidMapping.storeLIDPNMappings — bridge auto-learns, no-op')
 			}
 		}
 	}
@@ -217,11 +287,21 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 	const { ws, isRawNodeEnabled } = makeWsEmitter(() => client)
 
 	let tagEpoch = 0
-	const tagPrefix = `${Date.now().toString(36)}.`
+	// Per-socket random prefix avoids collisions between sockets created
+	// in the same millisecond. Date.now()-based prefixes (the previous
+	// implementation) collided in test loops and worker pools — every
+	// socket started at `tagEpoch=0` and a tagged message-id collision
+	// breaks waitForMessage routing.
+	const tagPrefix = `${randomBytes(6).toString('base64url')}.`
 	const generateMessageTag = () => `${tagPrefix}${tagEpoch++}`
 
 	let pairedAccount: { platform?: string; businessName?: string } | undefined
 	let cachedAccount: proto.IAdvSignedDeviceIdentity | undefined
+	// Holds the wrapped store created when the user passed legacy
+	// `auth: { creds, keys }` instead of `auth.store`. We need it in
+	// `end()` to drain the debounced `saveCreds` timer — `auth.store?.flush?.()`
+	// covers the explicit-store path but not this one.
+	let autoWrappedStore: { flush?: () => Promise<void> } | undefined
 
 	const ctx: SocketContext = {
 		ev,
@@ -287,13 +367,19 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		let bridgeStore = auth.store ?? null
 		if (!bridgeStore && auth.creds && auth.keys) {
 			const legacyState = { creds: auth.creds, keys: auth.keys }
-			bridgeStore = await wrapLegacyStore(
+			const wrapped = await wrapLegacyStore(
 				legacyState,
 				async () => {
 					ev.emit('creds.update', auth.creds!)
 				},
 				logger
 			)
+			bridgeStore = wrapped
+			// Stash on the closure so `end()` can drain the debounced
+			// `saveCreds` timer. `auth.store?.flush?.()` only runs when the
+			// caller passed an explicit store — this auto-wrap path needs
+			// its own hook.
+			autoWrappedStore = wrapped
 			logger.debug('auth: auto-wrapped legacy {creds, keys} via wrapLegacyStore')
 		}
 
@@ -302,7 +388,8 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 			makeHttpClient(fullConfig),
 			handleEvent,
 			bridgeStore,
-			fullConfig.cache ?? null
+			fullConfig.cache ?? null,
+			fullConfig.version
 		)
 		// Make this client the fallback for standalone helpers like
 		// downloadContentFromMessage that have no socket reference.
@@ -316,9 +403,6 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 			platformType: browserToPlatformType(browserName),
 			...fullConfig.deviceProps
 		})
-
-		const [major, minor, patch] = fullConfig.version
-		client.setVersion(major, minor, patch)
 
 		const [jid, lid, account] = await Promise.all([
 			client.getJid(),
@@ -344,7 +428,25 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 			client.setRawNodeForwarding(true)
 		}
 
-		client.run()
+		// `run()` is fire-and-forget by design (the bridge runs the read
+		// loop until disconnect/free) but typed `Promise<void>`. A late
+		// rejection (lost connection during cleanup, etc) without a
+		// `.catch` would escape to `process.on('unhandledRejection')`.
+		// Funnel into the connection.update channel so consumers' regular
+		// reconnect/diagnostic plumbing handles it like any other close.
+		const runPromise = client.run() as unknown as Promise<void> | undefined
+		if (runPromise && typeof runPromise.catch === 'function') {
+			runPromise.catch(err => {
+				logger.error({ err }, 'bridge client.run() rejected')
+				ev.emit('connection.update', {
+					connection: 'close',
+					lastDisconnect: {
+						error: err instanceof Error ? err : new Boom(String(err), { statusCode: 500 }),
+						date: new Date()
+					}
+				} as Partial<ConnectionState>)
+			})
+		}
 	}
 
 	let initError: Error | undefined
@@ -363,10 +465,31 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 				/* ignore */
 			}
 
+			// Barrier: bridge cleanup paths fired during `disconnect()` may
+			// emit `set()` calls that are still queued as microtasks /
+			// `setImmediate` callbacks at this point. Two yields to the
+			// event loop drain (1) microtask queue and (2) the next
+			// macrotask tick where wasm-bindgen async callbacks land.
+			// Without this barrier, the flushes below run before the bridge
+			// has finished writing — a race that loses the last few sets
+			// (typically the closing-session ratchet step).
+			await new Promise(resolve => setImmediate(resolve))
+			await new Promise(resolve => setImmediate(resolve))
+
+			// Capture the FIRST flush failure so a corrupt-on-shutdown auth
+			// state surfaces to the caller. Always finish the rest of
+			// cleanup; rethrow at the end so c.free() still runs.
+			let firstFlushError: unknown
 			try {
 				await auth.store?.flush?.()
-			} catch {
-				/* ignore */
+			} catch (e) {
+				firstFlushError ??= e
+			}
+
+			try {
+				await autoWrappedStore?.flush?.()
+			} catch (e) {
+				firstFlushError ??= e
 			}
 
 			try {
@@ -374,6 +497,8 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 			} catch {
 				/* ignore */
 			}
+
+			if (firstFlushError) throw firstFlushError
 		}
 	}
 
@@ -426,8 +551,21 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		logger,
 		ws,
 		type: 'md' as const,
-		get user() {
-			return user
+		// Upstream `socket.ts:1106-1108` returns `authState.creds.me`, which
+		// carries `{ id, lid, name, verifiedName, ... }` — full Contact
+		// shape. Returning the bare `{id, lid}` like before broke
+		// upstream-port code that read `sock.user.name` /
+		// `sock.user.verifiedName`. Build the same structure on the fly
+		// from the merged auth.creds + paired-account state.
+		get user(): Contact | undefined {
+			if (!user?.id) return undefined
+			return {
+				id: user.id,
+				lid: user.lid,
+				name: pairedAccount?.businessName ?? auth.creds?.me?.name,
+				verifiedName: auth.creds?.me?.verifiedName,
+				...(auth.creds?.me?.phoneNumber ? { phoneNumber: auth.creds.me.phoneNumber } : {})
+			}
 		},
 		get waClient() {
 			return client
@@ -472,15 +610,22 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 			return new Promise<T>((resolve, reject) => {
 				const timeout = timeoutMs ?? fullConfig.defaultQueryTimeoutMs
 				let timer: NodeJS.Timeout | undefined
+				const tag = `TAG:${msgId}`
+				// Use `on`+explicit `off` instead of `once`. Two callers
+				// awaiting the same id (rare but legal — can happen when an
+				// id is reused for retries, or when both an `<ack>` and an
+				// `<iq result>` carry the same id) would otherwise have the
+				// second listener silently consumed by the first emit.
 				const onRecv = (data: T) => {
 					if (timer) clearTimeout(timer)
+					ws.off(tag, listener)
 					resolve(data)
 				}
-
-				ws.once(`TAG:${msgId}`, onRecv as (...args: unknown[]) => void)
+				const listener = onRecv as (...args: unknown[]) => void
+				ws.on(tag, listener)
 				if (timeout) {
 					timer = setTimeout(() => {
-						ws.off(`TAG:${msgId}`, onRecv as (...args: unknown[]) => void)
+						ws.off(tag, listener)
 						reject(new Boom('Timed out waiting for message', { statusCode: DisconnectReason.timedOut }))
 					}, timeout)
 					// Query timers shouldn't keep the process alive past sock.end()
@@ -495,15 +640,31 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 			}
 
 			const msgId = node.attrs.id
+			const tag = `TAG:${msgId}`
+			// Snapshot the listeners on this tag BEFORE attaching ours so a
+			// sendNode failure can remove only what we added — never another
+			// caller's listener. `removeAllListeners(tag)` was the prior
+			// behavior; it could nuke a parallel `waitForMessage` belonging
+			// to a different consumer.
+			const before = ws.listeners(tag)
 			const resultPromise = sock.waitForMessage<BinaryNode>(msgId, timeoutMs)
 			try {
 				await sock.sendNode(node)
 			} catch (err) {
-				ws.removeAllListeners(`TAG:${msgId}`)
+				const ours = ws.listeners(tag).filter(l => !before.includes(l))
+				for (const l of ours) ws.off(tag, l as (...args: unknown[]) => void)
 				throw err
 			}
 
-			return resultPromise
+			const result = await resultPromise
+			// Mirror upstream `Socket/socket.ts:217-220`: a stanza with an
+			// `<error>` child is a server-rejection. Throw a Boom carrying
+			// the error code so consumers branching on
+			// `lastDisconnect.error.statusCode` / `.data` can react. Without
+			// this, code expecting upstream semantics treats a 403 / 405
+			// error response as success and reads garbage attrs.
+			assertNodeErrorFree(result)
+			return result
 		},
 		sendRawMessage: async (data: Uint8Array | Buffer) => {
 			return (await ctx.getClient()).sendRawMessage(data instanceof Uint8Array ? data : new Uint8Array(data))

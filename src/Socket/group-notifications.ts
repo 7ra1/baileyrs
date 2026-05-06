@@ -1,6 +1,7 @@
 import type { CanonicalGroupAction, CanonicalGroupUpdate } from '../Bridge/types.ts'
 import type { BaileysEventMap, GroupMetadata, WAMessage } from '../Types/index.ts'
 import { WAProto } from '../Types/index.ts'
+import { encodeStubParticipant } from '../Utils/group-stub-params.ts'
 
 /**
  * Bridges `<notification type="w:gp2">` actions onto the two event surfaces
@@ -45,14 +46,107 @@ export type GroupNotificationDomainEvent =
 	| { name: 'groups.update'; payload: BaileysEventMap['groups.update'] }
 	| null
 
+/**
+ * Whitelist of `RequestJoinMethod` values upstream Baileys recognizes.
+ * The bridge's `MembershipRequestMethod` is a wire-string enum that may
+ * grow with new variants; validating here keeps an unknown server-side
+ * method from leaking into consumer code as a typed but invalid value.
+ */
+const KNOWN_REQUEST_METHODS = new Set<NonNullable<BaileysEventMap['group.join-request']['method']>>([
+	'invite_link',
+	'linked_group_join',
+	'non_admin_add'
+])
+
+const validateRequestMethod = (raw: string | undefined): BaileysEventMap['group.join-request']['method'] => {
+	if (!raw) return undefined
+	return KNOWN_REQUEST_METHODS.has(raw as NonNullable<BaileysEventMap['group.join-request']['method']>)
+		? (raw as BaileysEventMap['group.join-request']['method'])
+		: undefined
+}
+
+/**
+ * Build all `group.join-request` events a notification fans out to —
+ * upstream emits one event per affected participant. Returns an empty
+ * array for non-join-request actions.
+ */
+export const buildGroupJoinRequestEvents = (
+	notification: CanonicalGroupUpdate
+): BaileysEventMap['group.join-request'][] => {
+	const action = notification.action
+	const author = notification.author
+	const authorPn = notification.authorPn
+
+	if (action.type === 'membershipApprovalRequest') {
+		// Single user requesting join. The author IS the requester, so
+		// without a real author there is no addressable participant —
+		// dropping the event beats emitting one with `participant: ''`.
+		if (!author) return []
+		return [
+			{
+				id: notification.groupJid,
+				author,
+				authorPn,
+				participant: author,
+				participantPn: authorPn,
+				action: 'created',
+				method: validateRequestMethod(action.requestMethod)
+			}
+		]
+	}
+
+	if (action.type === 'createdMembershipRequests') {
+		// Batched fanout (typically community parent → linked group). Emit
+		// one event per request entry; skip entries without a participant
+		// JID rather than synthesizing blanks.
+		if (!author) return []
+		const method = validateRequestMethod(action.requestMethod)
+		return action.requests
+			.filter(req => !!req.jid)
+			.map(req => ({
+				id: notification.groupJid,
+				author,
+				authorPn,
+				participant: req.jid,
+				participantPn: req.phoneNumber,
+				action: 'created',
+				method
+			}))
+	}
+
+	if (action.type === 'revokedMembershipRequests') {
+		// Admin revoked one or more pending requests. Method is unknown at
+		// this point (server doesn't echo the original method back).
+		if (!author) return []
+		return action.participants
+			.filter(p => !!p.jid)
+			.map(p => ({
+				id: notification.groupJid,
+				author,
+				authorPn,
+				participant: p.jid,
+				participantPn: p.phoneNumber,
+				action: 'revoked',
+				method: undefined
+			}))
+	}
+
+	return []
+}
+
 /** Build the upstream-style high-level event for a canonical group update. */
 export const buildGroupNotificationDomainEvent = (notification: CanonicalGroupUpdate): GroupNotificationDomainEvent => {
 	const action = notification.action
 	if (isParticipantAction(action)) {
 		const participants = action.participants.map(p => {
-			const entry: { id: string; admin?: 'admin' | 'superadmin' | null } = { id: p.jid }
+			const entry: { id: string; admin?: 'admin' | 'superadmin' | null; phoneNumber?: string } = { id: p.jid }
 			if (action.type === 'promote') entry.admin = 'admin'
 			else if (action.type === 'demote') entry.admin = null
+			// Carry the PN counterpart when the canonical layer extracted it
+			// from the bridge `<participant phone_number="...">` attribute.
+			// Lets bots in LID-mode groups DM the user via PN without an
+			// extra `lidMapping.getPNForLID` round-trip.
+			if (p.phoneNumber) entry.phoneNumber = p.phoneNumber
 			return entry
 		})
 		return {
@@ -116,15 +210,40 @@ interface StubRecipe {
 	idSuffix: string
 }
 
+/**
+ * Toggle-style actions: same stubType for both states, distinguished by
+ * stubParams[0] = 'on' | 'off'. `idSuffix` is shared (counter in the
+ * caller distinguishes individual emits).
+ */
+const TOGGLE_STUBS: Record<string, { stubType: number; on: boolean; idSuffix: string }> = {
+	locked: { stubType: STUB.GROUP_CHANGE_RESTRICT, on: true, idSuffix: 'restrict' },
+	unlocked: { stubType: STUB.GROUP_CHANGE_RESTRICT, on: false, idSuffix: 'restrict' },
+	announce: { stubType: STUB.GROUP_CHANGE_ANNOUNCE, on: true, idSuffix: 'announce' },
+	notAnnounce: { stubType: STUB.GROUP_CHANGE_ANNOUNCE, on: false, idSuffix: 'announce' }
+}
+
+/** Marker actions with no stubParams payload. */
+const SIMPLE_STUBS: Record<string, { stubType: number; idSuffix: string }> = {
+	revokeInvite: { stubType: STUB.GROUP_CHANGE_INVITE_LINK, idSuffix: 'rinv' },
+	create: { stubType: STUB.GROUP_CREATE, idSuffix: 'create' },
+	noFrequentlyForwarded: { stubType: STUB.GROUP_CHANGE_NO_FREQUENTLY_FORWARDED, idSuffix: 'nff' }
+}
+
 const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 	if (isParticipantAction(action)) {
 		const stubType = PARTICIPANT_STUBS[action.type]
 		return action.participants.map((p, idx) => ({
 			stubType,
-			stubParams: [p.jid],
+			stubParams: [encodeStubParticipant({ id: p.jid, phoneNumber: p.phoneNumber })],
 			idSuffix: `${idx}-${p.jid.split('@')[0]}`
 		}))
 	}
+
+	const toggle = TOGGLE_STUBS[action.type]
+	if (toggle) return [{ stubType: toggle.stubType, stubParams: [toggle.on ? 'on' : 'off'], idSuffix: toggle.idSuffix }]
+
+	const simple = SIMPLE_STUBS[action.type]
+	if (simple) return [{ stubType: simple.stubType, stubParams: [], idSuffix: simple.idSuffix }]
 
 	switch (action.type) {
 		case 'subject':
@@ -137,14 +256,6 @@ const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 					idSuffix: 'desc'
 				}
 			]
-		case 'locked':
-			return [{ stubType: STUB.GROUP_CHANGE_RESTRICT, stubParams: ['on'], idSuffix: 'restrict' }]
-		case 'unlocked':
-			return [{ stubType: STUB.GROUP_CHANGE_RESTRICT, stubParams: ['off'], idSuffix: 'restrict' }]
-		case 'announce':
-			return [{ stubType: STUB.GROUP_CHANGE_ANNOUNCE, stubParams: ['on'], idSuffix: 'announce' }]
-		case 'notAnnounce':
-			return [{ stubType: STUB.GROUP_CHANGE_ANNOUNCE, stubParams: ['off'], idSuffix: 'announce' }]
 		case 'membershipApprovalMode':
 			return [
 				{
@@ -155,16 +266,19 @@ const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 			]
 		case 'memberAddMode':
 			return [{ stubType: STUB.GROUP_MEMBER_ADD_MODE, stubParams: [action.mode], idSuffix: 'mam' }]
-		case 'revokeInvite':
-			return [{ stubType: STUB.GROUP_CHANGE_INVITE_LINK, stubParams: [], idSuffix: 'rinv' }]
-		case 'create':
-			return [{ stubType: STUB.GROUP_CREATE, stubParams: [], idSuffix: 'create' }]
-		case 'noFrequentlyForwarded':
-			return [{ stubType: STUB.GROUP_CHANGE_NO_FREQUENTLY_FORWARDED, stubParams: [], idSuffix: 'nff' }]
 		default:
 			return []
 	}
 }
+
+/**
+ * Process-monotonic counter mixed into stub IDs so two notifications
+ * with the same `(timestamp, stubType, idSuffix)` (e.g. admin renames
+ * a group twice in the same second) generate distinct keys. Without
+ * this, message stores indexed by `key.id` would silently overwrite
+ * the earlier event.
+ */
+let stubIdCounter = 0
 
 /**
  * Build all stub WAMessages a group notification action should fan out to.
@@ -180,7 +294,7 @@ export const buildGroupNotificationStubMessages = (notification: CanonicalGroupU
 				key: {
 					remoteJid: notification.groupJid,
 					fromMe,
-					id: `BAE-GP-${notification.timestamp}-${r.stubType}-${r.idSuffix}`,
+					id: `BAE-GP-${notification.timestamp}-${r.stubType}-${r.idSuffix}-${(stubIdCounter++).toString(36)}`,
 					participant: notification.author
 				},
 				participant: notification.author,

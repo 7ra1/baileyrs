@@ -21,7 +21,7 @@ import process from 'node:process'
 import { after, before, describe, test } from 'node:test'
 import P from 'pino'
 import { type proto, WAMessageStubType } from '../../index.ts'
-import { expect } from '../expect.ts'
+import { expect, expectStubParticipant } from '../expect.ts'
 import { createTestClient, destroyTestClient, type TestClient } from './test-client.ts'
 import { waitForEvent, waitForMessage } from './wait.ts'
 
@@ -82,9 +82,10 @@ describe('E2E: Group lifecycle (create → message → promote → demote → ki
 		const charlieStubCreate = waitForMessage(charlie.sock, m => m.messageStubType === WAMessageStubType.GROUP_CREATE)
 
 		const result = await alice.sock.groupCreate(subject, [bob.jid, charlie.jid])
-		expect(result.gid).toBeTruthy()
-		expect(result.gid.endsWith('@g.us')).toBe(true)
-		groupJid = result.gid
+		expect(result.id).toBeTruthy()
+		expect(result.id.endsWith('@g.us')).toBe(true)
+		expect(result.subject).toBe(subject)
+		groupJid = result.id
 
 		const [aliceUpdate, bobUpdate, charlieUpdate] = await Promise.all([
 			aliceGroupsUpdate,
@@ -180,11 +181,8 @@ describe('E2E: Group lifecycle (create → message → promote → demote → ki
 
 		// Stub message — what sung's anti-system handler reads from.
 		const [bobStub, charlieStub] = await Promise.all([bobStubPromote, charlieStubPromote])
-		// `messageStubParameters[0]` must equal the promoted participant JID,
-		// because that's the field sung's `handleAntiTheftPromote` passes to
-		// `atualizarParticipantes('promote', ...)`.
-		expect(bobStub.messageStubParameters?.[0]).toBe(lidJid(bob))
-		expect(charlieStub.messageStubParameters?.[0]).toBe(lidJid(bob))
+		expectStubParticipant(bobStub.messageStubParameters?.[0], { id: lidJid(bob) })
+		expectStubParticipant(charlieStub.messageStubParameters?.[0], { id: lidJid(bob) })
 	})
 
 	test('Bob (now admin) sends to group → alice+charlie receive', async () => {
@@ -215,7 +213,7 @@ describe('E2E: Group lifecycle (create → message → promote → demote → ki
 
 		const bobStub = await bobStubDemote
 		expect(bobStub.messageStubType).toBe(WAMessageStubType.GROUP_PARTICIPANT_DEMOTE)
-		expect(bobStub.messageStubParameters?.[0]).toBe(lidJid(bob))
+		expectStubParticipant(bobStub.messageStubParameters?.[0], { id: lidJid(bob) })
 	})
 
 	test('Alice removes charlie → alice+bob see remove + stub; charlie sees its own removal', async () => {
@@ -240,7 +238,7 @@ describe('E2E: Group lifecycle (create → message → promote → demote → ki
 
 		const bobStub = await bobStubRemove
 		expect(bobStub.messageStubType).toBe(WAMessageStubType.GROUP_PARTICIPANT_REMOVE)
-		expect(bobStub.messageStubParameters?.[0]).toBe(lidJid(charlie))
+		expectStubParticipant(bobStub.messageStubParameters?.[0], { id: lidJid(charlie) })
 	})
 
 	test('After kick: alice+bob can still message each other in the group', async () => {

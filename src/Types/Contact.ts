@@ -9,9 +9,8 @@ export interface Contact {
 	name?: string
 	/** name of the contact, the contact has set on their own on WA */
 	notify?: string
-	/** I have no idea */
+	/** Display name verified by WhatsApp Business — set on business accounts. */
 	verifiedName?: string
-	// Baileys Added
 	/**
 	 * Url of the profile picture of the contact
 	 *
@@ -21,4 +20,6 @@ export interface Contact {
 	 */
 	imgUrl?: string | null
 	status?: string
+	/** Meta username if the contact has set one (history sync surfaces it on the chat). */
+	username?: string
 }

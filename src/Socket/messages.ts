@@ -52,7 +52,7 @@ export const makeMessageMethods = (ctx: SocketContext) => ({
 		jid: string,
 		content: AnyMessageContent,
 		options?: Omit<MessageGenerationOptions, 'waClient' | 'logger' | 'userJid' | 'mediaInNote'>
-	): Promise<WAMessage | undefined> => {
+	): Promise<WAMessage> => {
 		const client = await ctx.getClient()
 		const user = ctx.getUser()
 		const userJid = user?.id ? jidNormalizedUser(user.id) : ''
@@ -73,7 +73,13 @@ export const makeMessageMethods = (ctx: SocketContext) => ({
 		if (contentType === 'protocolMessage') {
 			const protoMsg = msg.protocolMessage
 			if (protoMsg?.type === WAProto.Message.ProtocolMessage.Type.REVOKE && protoMsg?.key?.id) {
-				await client.revokeMessage(jid, protoMsg.key.id)
+				// Group revokes need the original sender's participant JID —
+				// without it the server rejects the revoke. The bridge
+				// signature is `revokeMessage(jid, message_id, participant?)`.
+				// Caller passes participant via `message.delete.participant`
+				// which lands on `protoMsg.key.participant` in the generated
+				// proto.
+				await client.revokeMessage(jid, protoMsg.key.id, protoMsg.key.participant ?? null)
 				return fullMsg
 			}
 

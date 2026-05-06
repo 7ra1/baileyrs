@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import type { JsStoreCallbacks } from 'whatsapp-rust-bridge'
 import { proto } from 'whatsapp-rust-bridge/proto-types'
 import type { AuthenticationCreds, AuthenticationState, LTHashState, SignalDataTypeMap } from '../Types/index.ts'
+import { jidDecode } from '../WABinary/jid-utils.ts'
+import { BufferJSON } from './generics.ts'
 
 // Runtime WAProto exports ADVSignedDeviceIdentity but d.ts uses AdvSignedDeviceIdentity
 type ProtoCodec = {
@@ -68,30 +70,23 @@ const STORE_MAP: Record<string, string> = {
 	meta: 'bridge-meta'
 }
 
-// Stores where bridge data is passthrough binary (no conversion).
-// All Signal-protocol records (`identity`, `session`, `sender_key`) now
-// route through converters because every one of them either:
-//   • has a different key shape between bridge and upstream, OR
-//   • has a different value-byte encoding (proto / JSON / 32-vs-33-byte
-//     prefix), OR
-//   • both.
-// Keeping the empty set as an extension point — future bridge stores that
-// are byte-compatible with upstream can land here without a converter.
+// Stores that are byte-compatible between bridge and upstream and so can
+// be persisted unchanged. Currently empty — every Signal record needs
+// either a key rewrite or a value-byte conversion, both handled by
+// `converters` below.
 const BINARY_STORES = new Set<string>()
 
-// Bridge-only stores — raw binary persisted through keys interface.
-// `lid_mapping` is intentionally excluded — it has a converter so the
-// `pn:`/`lid:` prefixed bridge keys translate to upstream's bare-userpart
-// `{pnUser}` + `{lidUser}_reverse` shape, letting both libraries share
-// the same on-disk LID↔PN mapping table.
-const BRIDGE_ONLY_STORES = new Set([
-	'signed_prekey',
-	'sender_key_devices',
-	'base_key',
-	'sent_message',
-	'mutation_mac',
-	'meta'
-])
+// Bridge-only stores — raw binary persisted through the keys interface.
+// Derived from STORE_MAP: anything mapped to a `bridge-*` upstream type
+// has no peer in upstream Baileys' SignalDataTypeMap and must round-trip
+// as raw bytes. `lid_mapping` is mapped to upstream's `lid-mapping` type
+// instead (its converter rewrites the key prefixes), so it's not
+// bridge-only and is naturally excluded by the prefix filter.
+const BRIDGE_ONLY_STORES = new Set(
+	Object.entries(STORE_MAP)
+		.filter(([, upstreamType]) => upstreamType.startsWith('bridge-'))
+		.map(([bridgeName]) => bridgeName)
+)
 
 // ---- Bridge Jid type (matches Rust Jid serde derive) ----
 
@@ -104,11 +99,16 @@ interface BridgeJid {
 }
 
 /** Reconstruct a JID string from the bridge's serialized Jid object.
- *  Format: "user:device@server" (device omitted when 0). */
+ *  Format: `user[_<agent>][:<device>]@<server>`. The agent suffix is
+ *  required to round-trip hosted Business accounts (`5511_2@hosted`) —
+ *  `credsToDeviceJson` stores it, so the load path must also emit it.
+ *  Without this, `creds.me.id` would lose the `_<agent>` half on every
+ *  reload and the next `credsToDeviceJson` save would zero `agent`. */
 function bridgeJidToString(j: BridgeJid | null | undefined): string | null {
 	if (!j?.user || !j?.server) return null
+	const agent = j.agent ?? 0
 	const device = j.device ?? 0
-	return `${j.user}${device > 0 ? ':' + device : ''}@${j.server}`
+	return `${j.user}${agent > 0 ? '_' + agent : ''}${device > 0 ? ':' + device : ''}@${j.server}`
 }
 
 /** Typed subset of the bridge Device JSON we read back in updateCredsFromDevice. */
@@ -141,6 +141,21 @@ const toBuf = (v: unknown): Uint8Array | null =>
 /** Convert Buffer/Uint8Array to a plain number[] for JSON serialization.
  *  Matches Rust's serde_json Vec<u8> format: [byte, byte, ...] */
 const bufToNumArray = (v: Uint8Array | Buffer): number[] => Array.from(Buffer.from(v))
+
+/**
+ * `true` when the key bytes are absent or all zeros. Used at the device-read
+ * boundary to detect a partially-hydrated creds object (e.g. migration
+ * remnants where only `me.id` survived) and tell the bridge to bootstrap
+ * fresh material instead of blowing up the noise handshake with `precondition-required`.
+ */
+const isZeroKey = (b: Uint8Array | Buffer | undefined | null): boolean => {
+	if (!b) return true
+	// Buffer is a Uint8Array subclass at runtime, so this view is always safe.
+	const view = b as Uint8Array
+	if (view.length === 0) return true
+	for (let i = 0; i < view.length; i++) if (view[i] !== 0) return false
+	return true
+}
 
 /** Bridge uses hex-encoded key IDs for sync_key; upstream uses base64. Convert hex→base64. */
 const hexToBase64 = (hex: string): string => Buffer.from(hex, 'hex').toString('base64')
@@ -413,22 +428,6 @@ interface UpstreamSenderKeyState {
 	senderMessageKeys?: Array<{ iteration?: number; seed?: Uint8Array | Buffer }>
 }
 
-// BufferJSON-compatible replacer/reviver matching upstream `Utils/generics`.
-const bufferJsonReplacer = (_k: string, v: unknown): unknown => {
-	if (Buffer.isBuffer(v) || v instanceof Uint8Array || (v as { type?: string })?.type === 'Buffer') {
-		const data = (v as { data?: unknown })?.data ?? v
-		return { type: 'Buffer', data: Buffer.from(data as Uint8Array).toString('base64') }
-	}
-	return v
-}
-const bufferJsonReviver = (_k: string, v: unknown): unknown => {
-	const obj = v as { type?: string; data?: unknown } | null
-	if (obj && typeof obj === 'object' && obj.type === 'Buffer' && typeof obj.data === 'string') {
-		return Buffer.from(obj.data, 'base64')
-	}
-	return v
-}
-
 const sk_toBytes = (v: Uint8Array | Buffer | undefined): Uint8Array =>
 	v ? new Uint8Array(Buffer.from(v)) : new Uint8Array()
 const sk_toBuffer = (v: Uint8Array | Buffer | undefined): Buffer => Buffer.from(v ?? new Uint8Array())
@@ -454,11 +453,11 @@ function bridgeSenderKeyProtoToJson(protoBytes: Uint8Array): Buffer {
 			seed: sk_toBuffer(mk.seed)
 		}))
 	}))
-	return Buffer.from(JSON.stringify(states, bufferJsonReplacer), 'utf-8')
+	return Buffer.from(JSON.stringify(states, BufferJSON.replacer), 'utf-8')
 }
 
 function upstreamSenderKeyJsonToProto(jsonBuf: Uint8Array): Uint8Array {
-	const states = JSON.parse(Buffer.from(jsonBuf).toString('utf-8'), bufferJsonReviver) as UpstreamSenderKeyState[]
+	const states = JSON.parse(Buffer.from(jsonBuf).toString('utf-8'), BufferJSON.reviver) as UpstreamSenderKeyState[]
 	const senderKeyStates = states.map(s => ({
 		senderKeyId: s.senderKeyId ?? 0,
 		senderChainKey: { iteration: s.senderChainKey?.iteration ?? 0, seed: sk_toBytes(s.senderChainKey?.seed) },
@@ -774,19 +773,23 @@ function upstreamSessionRecordToProto(record: unknown): Uint8Array {
 
 // ---- Device/Creds ----
 
-/** Parse a JID string into { user, device, server } */
-function parseJid(jid: string | undefined): { user: string; device: number; server: string } | null {
-	if (!jid) return null
-	const atIdx = jid.indexOf('@')
-	if (atIdx < 0) return null
-	const server = jid.slice(atIdx + 1)
-	const userPart = jid.slice(0, atIdx)
-	const colonIdx = userPart.indexOf(':')
-	if (colonIdx >= 0) {
-		return { user: userPart.slice(0, colonIdx), device: parseInt(userPart.slice(colonIdx + 1)) || 0, server }
-	}
-
-	return { user: userPart, device: 0, server }
+/**
+ * Extract the literal `_<n>` agent suffix from a raw JID. `jidDecode`
+ * folds it into `domainType` only for plain `s.whatsapp.net`; for special
+ * servers (`hosted`, `hosted.lid`) it is parsed-then-discarded because
+ * `domainType` is taken from the server. The bridge's `Jid.agent`
+ * field needs the literal number, so recover it here.
+ */
+function jidAgent(rawJid: string | undefined | null): number {
+	if (!rawJid) return 0
+	const atIdx = rawJid.indexOf('@')
+	if (atIdx < 0) return 0
+	const userPart = rawJid.slice(0, atIdx).split(':', 1)[0]
+	if (!userPart) return 0
+	const sepIdx = userPart.indexOf('_')
+	if (sepIdx < 0) return 0
+	const n = parseInt(userPart.slice(sepIdx + 1), 10)
+	return Number.isFinite(n) ? n : 0
 }
 
 function credsToDeviceJson(creds: AuthenticationCreds): Uint8Array {
@@ -796,16 +799,20 @@ function credsToDeviceJson(creds: AuthenticationCreds): Uint8Array {
 		return bufToNumArray(Buffer.from(pair.private)).concat(bufToNumArray(Buffer.from(pair.public)))
 	}
 
-	// Extract device number from me.id (e.g. "559984726662:7@s.whatsapp.net")
-	// or fall back to me.lid (e.g. "236395184570386:10@lid") for the device index
-	const pnJid = parseJid(creds.me?.id)
-	const lidJid = parseJid(creds.me?.lid)
-	// If me.id has no device suffix, use the LID's device number
-	const deviceNum = pnJid && pnJid.device > 0 ? pnJid.device : (lidJid?.device ?? 0)
+	const pnJid = jidDecode(creds.me?.id)
+	const lidJid = jidDecode(creds.me?.lid)
+	const deviceNum = pnJid?.device ?? lidJid?.device ?? 0
+	const pnAgent = jidAgent(creds.me?.id)
+	const lidAgent = jidAgent(creds.me?.lid)
 
+	// Preserve `server` and recover the literal `_<n>` agent suffix so
+	// hosted / hosted.lid accounts (e.g. `5511_2@hosted`) survive a
+	// drop-in migration from upstream Baileys.
 	return toJson({
-		pn: pnJid ? { user: pnJid.user, server: 's.whatsapp.net', device: deviceNum, agent: 0, integrator: 0 } : null,
-		lid: lidJid ? { user: lidJid.user, server: 'lid', device: lidJid.device, agent: 0, integrator: 0 } : null,
+		pn: pnJid ? { user: pnJid.user, server: pnJid.server, device: deviceNum, agent: pnAgent, integrator: 0 } : null,
+		lid: lidJid
+			? { user: lidJid.user, server: lidJid.server, device: lidJid.device ?? 0, agent: lidAgent, integrator: 0 }
+			: null,
 		registration_id: creds.registrationId ?? 0,
 		noise_key: kp(creds.noiseKey),
 		identity_key: kp(creds.signedIdentityKey),
@@ -1071,7 +1078,7 @@ export async function wrapLegacyStore(
 		if (credsTimer) clearTimeout(credsTimer)
 		credsTimer = setTimeout(() => {
 			credsTimer = null
-			saveCreds().catch(() => {})
+			saveCreds().catch(err => warn('saveCreds failed', err))
 		}, 100)
 	}
 
@@ -1168,6 +1175,16 @@ export async function wrapLegacyStore(
 					// bootstrap its own device identity and write it back
 					// through `set('device', 'device', …)` on pair-success.
 					if (!creds.noiseKey && !creds.me?.id) return null
+					// Even when `noiseKey` is present as an object, the bytes
+					// can still be all-zero — happens after a partial migration
+					// from a legacy creds.json that only persisted `me.id`.
+					// `credsToDeviceJson` would happily emit zero-filled key
+					// slots, which the server rejects with the same 428. Treat
+					// any zero-byte critical key as a bootstrap signal.
+					if (isZeroKey(creds.noiseKey?.private) || isZeroKey(creds.signedIdentityKey?.private)) {
+						warn('device read: noiseKey/signedIdentityKey is zero-valued; signaling bootstrap to bridge')
+						return null
+					}
 					return credsToDeviceJson(creds)
 				}
 				if (key === 'account') {
@@ -1178,14 +1195,9 @@ export async function wrapLegacyStore(
 				return readBinary(type, key)
 			}
 
-			if (route === 'signal') {
-				// `BINARY_STORES` is empty as of the move-to-converter
-				// migration — keeping the branch for future passthrough
-				// stores. No identity fallback needed: identity now goes
-				// through the converter, which handles both the address
-				// rewrite and the 32↔33-byte prefix.
-				return readBinary(type, key)
-			}
+			// `signal` route is currently unreachable (BINARY_STORES is empty);
+			// kept for future byte-compatible stores.
+			if (route === 'signal') return readBinary(type, key)
 
 			if (route === 'bridge-only') return readBinary(type, key)
 
@@ -1261,54 +1273,40 @@ export async function wrapLegacyStore(
 		},
 
 		async flush() {
-			if (credsTimer) {
+			// Drain in a loop because `set('device', ...)` calls landing
+			// during `await saveCreds()` queue a fresh `credsTimer`. A
+			// single-pass flush would leave the latest creds on the timer
+			// — `dispose()` then fires saveCreds() but the orchestrator
+			// has already moved on (`free()`), so the write is racing
+			// against process exit. Looping until the timer is null after
+			// a save closes the window deterministically. Bounded by a
+			// small max-iterations guard so a saveCreds() that re-emits
+			// credentials in a tight loop can't lock us forever.
+			for (let i = 0; i < 32 && credsTimer; i++) {
 				clearTimeout(credsTimer)
 				credsTimer = null
 				await saveCreds()
+			}
+			if (credsTimer) {
+				warn('flush hit max-iterations cap; pending credsTimer dropped — saveCreds may be re-emitting in a loop')
+				clearTimeout(credsTimer)
+				credsTimer = null
 			}
 		},
 
 		dispose() {
 			if (credsTimer) {
 				clearTimeout(credsTimer)
-				saveCreds().catch(() => {})
+				saveCreds().catch(err => warn('saveCreds failed during dispose', err))
 			}
 		}
 	}
 }
 
 // ---- Legacy multi-file auth state loader ----
-// Reads upstream Baileys' creds.json + per-key .json files (BufferJSON format).
-// This is the same format used by @whiskeysockets/baileys useMultiFileAuthState.
-
-/** JSON reviver that restores `{ type: "Buffer", data: "base64" | number[] }` → Buffer */
-interface BufferLike {
-	type?: string
-	buffer?: boolean
-	data?: unknown
-	value?: unknown
-}
-const bufferReviver = (_: string, value: unknown) => {
-	if (
-		value !== null &&
-		value !== undefined &&
-		typeof value === 'object' &&
-		((value as BufferLike).type === 'Buffer' || (value as BufferLike).buffer === true)
-	) {
-		const data = (value as BufferLike).data ?? (value as BufferLike).value
-		return typeof data === 'string'
-			? Buffer.from(data, 'base64')
-			: Buffer.from((Array.isArray(data) ? data : []) as number[])
-	}
-
-	return value
-}
-
-/** JSON replacer that serializes Buffer/Uint8Array → `{ type: "Buffer", data: "base64" }` */
-const bufferReplacer = (_: string, value: unknown) =>
-	value instanceof Uint8Array || Buffer.isBuffer(value)
-		? { type: 'Buffer', data: Buffer.from(value).toString('base64') }
-		: value
+// Reads upstream Baileys' creds.json + per-key .json files via the
+// shared `BufferJSON` codec (same as @whiskeysockets/baileys
+// useMultiFileAuthState).
 
 const fixFileName = (file?: string) => file?.replace(/\//g, '__')?.replace(/:/g, '-')
 
@@ -1337,14 +1335,14 @@ export async function useLegacyMultiFileAuthState(
 	const readData = async (file: string) => {
 		try {
 			const data = await readFile(join(folder, fixFileName(file)!), 'utf-8')
-			return JSON.parse(data, bufferReviver)
+			return JSON.parse(data, BufferJSON.reviver)
 		} catch {
 			return null
 		}
 	}
 
 	const writeData = async (data: unknown, file: string) => {
-		await writeFile(join(folder, fixFileName(file)!), JSON.stringify(data, bufferReplacer))
+		await writeFile(join(folder, fixFileName(file)!), JSON.stringify(data, BufferJSON.replacer))
 	}
 
 	const removeData = async (file: string) => {

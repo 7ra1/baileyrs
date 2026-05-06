@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { decodeStubParticipant, type StubParticipantPayload } from '../Utils/group-stub-params.ts'
 
 type Ctor = new (...args: never[]) => unknown
 type ThrowMatcher = string | RegExp | Error | Ctor | ((err: Error) => boolean)
@@ -19,6 +20,8 @@ interface Matchers<T> {
 	toHaveLength(n: number): void
 	toHaveProperty(path: string): void
 	toThrow(matcher?: ThrowMatcher): void
+	/** Asserts the actual object contains all the given keys with deep-equal values (extra keys allowed). */
+	toMatchObject(expected: Partial<T> | Record<string, unknown>): void
 }
 
 interface AsyncMatchers<T> {
@@ -56,6 +59,43 @@ function toHavePropertyImpl(actual: unknown, path: string): void {
 	}
 }
 
+function toMatchObjectImpl(actual: unknown, expected: unknown): void {
+	if (actual == null || typeof actual !== 'object') {
+		assert.fail(`expected object, got ${typeof actual}`)
+	}
+	if (expected == null || typeof expected !== 'object') {
+		assert.fail(`toMatchObject expects an object, got ${typeof expected}`)
+	}
+	for (const [key, expVal] of Object.entries(expected as Record<string, unknown>)) {
+		// Catches the case where `expVal === undefined` would otherwise let
+		// a missing key on `actual` pass silently.
+		assert.ok(Object.prototype.hasOwnProperty.call(actual, key), `missing property "${key}"`)
+		const actVal: unknown = (actual as Record<string, unknown>)[key]
+		if (expVal !== null && typeof expVal === 'object' && !Array.isArray(expVal)) {
+			toMatchObjectImpl(actVal, expVal)
+		} else {
+			assert.deepStrictEqual(actVal, expVal, `mismatch at "${key}"`)
+		}
+	}
+}
+
+/**
+ * Assert a `messageStubParameters[i]` raw string decodes to a participant
+ * payload that contains AT LEAST the expected fields. Extra fields on the
+ * decoded payload (e.g. a `phoneNumber` the bridge happens to include) do
+ * NOT fail the assert — callers state only what they care about. Fails
+ * loudly when the string is missing, not valid JSON, or has the wrong
+ * shape, which catches regressions where a raw JID leaks back in.
+ */
+export function expectStubParticipant(raw: string | null | undefined, expected: StubParticipantPayload): void {
+	const decoded = decodeStubParticipant(raw)
+	assert.ok(decoded !== null, `expected stub participant payload, got ${JSON.stringify(raw)}`)
+	assert.strictEqual(decoded.id, expected.id, 'stub participant id mismatch')
+	if (expected.phoneNumber !== undefined) {
+		assert.strictEqual(decoded.phoneNumber, expected.phoneNumber, 'stub participant phoneNumber mismatch')
+	}
+}
+
 export function expect<T>(actual: T): Expect<T> {
 	const throwsFn = actual as () => unknown
 	const maybePromise = actual as Promise<unknown>
@@ -74,6 +114,7 @@ export function expect<T>(actual: T): Expect<T> {
 		toContain: item => toContainImpl(actual, item),
 		toHaveLength: n => assert.strictEqual((actual as { length?: number }).length, n),
 		toHaveProperty: p => toHavePropertyImpl(actual, p),
+		toMatchObject: e => toMatchObjectImpl(actual, e),
 		toThrow: m => assert.throws(throwsFn, m as Parameters<typeof assert.throws>[1]),
 		not: {
 			toBe: e => assert.notStrictEqual(actual, e),

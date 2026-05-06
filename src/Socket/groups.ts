@@ -2,6 +2,21 @@ import type { GroupMetadataResult } from 'whatsapp-rust-bridge'
 import type { GroupMetadata } from '../Types/index.ts'
 import type { SocketContext } from './types.ts'
 
+/**
+ * Verbs accepted by upstream Baileys' single-arg `groupSettingUpdate(jid, verb)`:
+ * `'announcement' | 'not_announcement' | 'locked' | 'unlocked'`. Native
+ * settings (`'announce' | 'membership_approval'`) flow through the
+ * two-arg form with an explicit boolean value.
+ */
+type GroupSettingArg = 'announce' | 'membership_approval' | 'locked' | 'unlocked' | 'announcement' | 'not_announcement'
+type GroupSettingResolved = { setting: 'locked' | 'announce' | 'membership_approval'; value: boolean }
+const GROUP_SETTING_ALIASES: Partial<Record<GroupSettingArg, GroupSettingResolved>> = {
+	announcement: { setting: 'announce', value: true },
+	not_announcement: { setting: 'announce', value: false },
+	locked: { setting: 'locked', value: true },
+	unlocked: { setting: 'locked', value: false }
+}
+
 /** Convert bridge GroupMetadataResult to Baileys GroupMetadata */
 function bridgeGroupToMetadata(g: GroupMetadataResult): GroupMetadata {
 	return {
@@ -37,8 +52,13 @@ export const makeGroupMethods = (ctx: SocketContext) => ({
 		return bridgeGroupToMetadata(g)
 	},
 
-	groupCreate: async (subject: string, participants: string[]) => {
-		return await (await ctx.getClient()).createGroup(subject, participants)
+	groupCreate: async (subject: string, participants: string[]): Promise<GroupMetadata> => {
+		// Bridge's `createGroup` parses the full `<group>` node from the
+		// server's create response and returns the same `GroupMetadataResult`
+		// shape as `getGroupMetadata` — single round-trip, matches upstream
+		// Baileys' `extractGroupMetadata(result)` flow.
+		const metadata = await (await ctx.getClient()).createGroup(subject, participants)
+		return bridgeGroupToMetadata(metadata)
 	},
 
 	groupLeave: async (jid: string) => {
@@ -79,51 +99,21 @@ export const makeGroupMethods = (ctx: SocketContext) => ({
 		return await (await ctx.getClient()).groupRevokeInvite(jid)
 	},
 
-	groupSettingUpdate: async (
-		jid: string,
-		setting:
-			| 'locked'
-			| 'announce'
-			| 'membership_approval'
-			| 'announcement'
-			| 'not_announcement'
-			| 'unlocked'
-			| 'on'
-			| 'off',
-		value?: boolean
-	) => {
+	groupSettingUpdate: async (jid: string, setting: GroupSettingArg, value?: boolean) => {
 		// Map upstream-Baileys legacy single-arg verbs onto the bridge's
-		// (setting, boolean) contract. Keeps `conn.groupSettingUpdate(jid, 'announcement')`
-		// working without forcing call-site migration.
-		let resolvedSetting: 'locked' | 'announce' | 'membership_approval'
-		let resolvedValue: boolean
-		switch (setting) {
-			case 'announcement':
-				resolvedSetting = 'announce'
-				resolvedValue = true
-				break
-			case 'not_announcement':
-				resolvedSetting = 'announce'
-				resolvedValue = false
-				break
-			case 'unlocked':
-				resolvedSetting = 'locked'
-				resolvedValue = false
-				break
-			case 'on':
-				resolvedSetting = 'locked'
-				resolvedValue = true
-				break
-			case 'off':
-				resolvedSetting = 'locked'
-				resolvedValue = false
-				break
-			default:
-				resolvedSetting = setting
-				resolvedValue = value ?? false
+		// (setting, boolean) contract via GROUP_SETTING_ALIASES. Native
+		// settings ('locked' / 'announce' / 'membership_approval') require
+		// an explicit `value` — silently defaulting to `false` masks a
+		// caller bug as a successful "turn off" call.
+		const alias = GROUP_SETTING_ALIASES[setting]
+		if (alias) {
+			await (await ctx.getClient()).groupSettingUpdate(jid, alias.setting, alias.value)
+			return
 		}
-
-		await (await ctx.getClient()).groupSettingUpdate(jid, resolvedSetting, resolvedValue)
+		if (value === undefined) {
+			throw new TypeError(`groupSettingUpdate: setting "${setting}" requires an explicit boolean value`)
+		}
+		await (await ctx.getClient()).groupSettingUpdate(jid, setting as GroupSettingResolved['setting'], value)
 	},
 
 	groupToggleEphemeral: async (jid: string, expiration: number) => {
