@@ -84,11 +84,6 @@ export const PSA_WID = '0@c.us'
 export const STORIES_JID = 'status@broadcast'
 export const META_AI_JID = '13135550002@c.us'
 
-export type JidWithDevice = {
-	user: string
-	device?: number
-}
-
 export const getServerFromDomainType = (initialServer: string, domainType?: WAJIDDomains): JidServer => {
 	switch (domainType) {
 		case WAJIDDomains.LID:
