@@ -1009,3 +1009,27 @@ export function getAggregateVotesInPollMessage(
 function getKeyAuthor(key: proto.IMessageKey, meId?: string): string {
 	return (key.fromMe ? meId : key.participant || key.remoteJid) || 'unknown'
 }
+
+/**
+ * Returns the device predicted by message ID
+ */
+export const getDevice = (id: string):
+	| 'ios'
+	| 'web'
+	| 'android'
+	| 'desktop'
+	| 'unknown' => {
+	if (/^3A.{18}$/.test(id)) {
+		return 'ios'
+	}
+	if (/^3E.{20}$/.test(id)) {
+		return 'web'
+	}
+	if (/^(.{21}|.{32})$/.test(id)) {
+		return 'android'
+	}
+	if (/^(3F|.{18}$)/.test(id)) {
+		return 'desktop'
+	}
+	return 'unknown'
+}

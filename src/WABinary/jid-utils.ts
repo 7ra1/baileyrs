@@ -76,3 +76,47 @@ export const jidNormalizedUser = (jid: string | undefined) => {
 	const { user, server } = result
 	return jidEncode(user, server === 'c.us' ? 's.whatsapp.net' : (server as JidServer))
 }
+
+export const S_WHATSAPP_NET = '@s.whatsapp.net'
+export const OFFICIAL_BIZ_JID = '16505361212@c.us'
+export const SERVER_JID = 'server@c.us'
+export const PSA_WID = '0@c.us'
+export const STORIES_JID = 'status@broadcast'
+export const META_AI_JID = '13135550002@c.us'
+
+export type JidWithDevice = {
+	user: string
+	device?: number
+}
+
+export const getServerFromDomainType = (initialServer: string, domainType?: WAJIDDomains): JidServer => {
+	switch (domainType) {
+		case WAJIDDomains.LID:
+			return 'lid'
+		case WAJIDDomains.HOSTED:
+			return 'hosted'
+		case WAJIDDomains.HOSTED_LID:
+			return 'hosted.lid'
+		case WAJIDDomains.WHATSAPP:
+		default:
+			return initialServer as JidServer
+	}
+}
+
+export const areJidsSameUser = (jid1: string | undefined, jid2: string | undefined) =>
+	jidDecode(jid1)?.user === jidDecode(jid2)?.user
+
+export const isJidMetaAI = (jid: string | undefined) => jid?.endsWith('@bot')
+
+export const isJidBroadcast = (jid: string | undefined) => jid?.endsWith('@broadcast')
+
+const botRegexp = /^1313555\d{4}$|^131655500\d{2}$/
+
+export const isJidBot = (jid: string | undefined) => jid && botRegexp.test(jid.split('@')[0]!) && jid.endsWith('@c.us')
+
+export const transferDevice = (fromJid: string, toJid: string) => {
+	const fromDecoded = jidDecode(fromJid)
+	const deviceId = fromDecoded?.device || 0
+	const { server, user } = jidDecode(toJid)!
+	return jidEncode(user, server, deviceId)
+}
